@@ -24,6 +24,13 @@ jobs:
         # TypeScript 7 dropped the JS language service, so it is deliberately not tested:
         # the plugin refuses to load on it by design. See README, "TypeScript version support".
         typescript_version: ['5', '6']
+        include:
+          # A single Windows cell, not a cross-product with Node and TypeScript. What differs
+          # on Windows is path resolution, CRLF detection and `ts.sys` file IO, and one cell
+          # exercises all three; a fourfold matrix of them would only cost minutes.
+          - os: windows-latest
+            node_version: 24
+            typescript_version: '5'
       fail-fast: false
     timeout-minutes: 10
 
@@ -55,6 +62,36 @@ jobs:
 
       - name: Test
         run: pnpm run test
+
+  coverage:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    name: 'Coverage: node-24, ubuntu-latest'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Set node version to 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install deps
+        run: pnpm install
+
+      # The CLI suite spawns oxlint against the built `dist/index.js`.
+      - name: Build
+        run: pnpm run build
+
+      # One cell, not the test matrix: the coverage number does not vary by Node or
+      # TypeScript version, so repeating it four times would measure the same thing.
+      # The thresholds in `vitest.config.ts` are what makes this a gate rather than a report.
+      - name: Test with coverage
+        run: pnpm run test:coverage
 
   lint:
     runs-on: ubuntu-latest

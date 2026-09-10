@@ -1,6 +1,9 @@
 import { defineConfig } from 'vitest/config';
 
-const CI_PREFLIGHT = Boolean(process.env.CI_PREFLIGHT);
+// Every CI provider sets `CI`; the annotated reporter is only ever useful there. This
+// replaced a bespoke `CI_PREFLIGHT` variable that nothing in the repo ever set, so the
+// annotations never actually appeared.
+const CI = Boolean(process.env.CI);
 
 // https://vitejs.dev/config/
 export default defineConfig({
@@ -29,6 +32,6 @@ export default defineConfig({
         lines: 95,
       },
     },
-    reporters: CI_PREFLIGHT ? ['default', 'github-actions'] : [['default', { summary: false }]],
+    reporters: CI ? ['default', 'github-actions'] : [['default', { summary: false }]],
   },
 });
