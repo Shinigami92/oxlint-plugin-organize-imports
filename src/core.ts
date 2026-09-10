@@ -4,6 +4,18 @@ import type { Edit, GetService, Mode, RuleOptions, ServiceEntry, Settings } from
 import { assertLanguageServiceAvailable } from './typescript-support';
 
 /**
+ * `organizeImports` decides what is unused from the *local* reference graph: it needs the
+ * parser, the binder, and the file's own checker, but never the types behind a module
+ * specifier. `noResolve` stops TypeScript from loading and parsing every transitively
+ * imported file, which is the overwhelming majority of the work in a single-file program.
+ *
+ * This is a large speedup for no change in output. Measurements, and the environment they
+ * were taken in, live in BENCHMARKS.md, which `pnpm run benchmark` regenerates:
+ * https://github.com/Shinigami92/oxlint-plugin-organize-imports/blob/main/BENCHMARKS.md
+ */
+const PERFORMANCE_OPTIONS: ts.CompilerOptions = { noResolve: true };
+
+/**
  * One `LanguageService` per tsconfig, reused for every file in the run.
  *
  * The host only ever reports the *current* file as a root, so TypeScript builds a
@@ -12,7 +24,13 @@ import { assertLanguageServiceAvailable } from './typescript-support';
  * `organize-imports-cli` use, and it is what keeps the plugin fast enough to run per-file
  * inside a linter.
  */
-export function createServiceCache(): GetService {
+/**
+ * @param compilerOptionOverrides Merged over the tsconfig's options. Defaults to
+ *   {@link PERFORMANCE_OPTIONS}; the benchmark passes `{}` to measure their effect.
+ */
+export function createServiceCache(
+  compilerOptionOverrides: ts.CompilerOptions = PERFORMANCE_OPTIONS
+): GetService {
   assertLanguageServiceAvailable();
 
   const services = new Map<string, ServiceEntry>();
@@ -20,7 +38,7 @@ export function createServiceCache(): GetService {
 
   function getCompilerOptions(tsconfigPath: string | null | undefined): ts.CompilerOptions {
     if (tsconfigPath === undefined || tsconfigPath === null || tsconfigPath.length === 0) {
-      return { allowJs: true, allowNonTsExtensions: true };
+      return { allowJs: true, allowNonTsExtensions: true, ...compilerOptionOverrides };
     }
 
     const cached = compilerOptions.get(tsconfigPath);
@@ -36,9 +54,11 @@ export function createServiceCache(): GetService {
       ts.sys,
       path.dirname(tsconfigPath)
     );
-    compilerOptions.set(tsconfigPath, options);
 
-    return options;
+    const withOverrides = { ...options, ...compilerOptionOverrides };
+    compilerOptions.set(tsconfigPath, withOverrides);
+
+    return withOverrides;
   }
 
   return function getService(tsconfigPath) {
@@ -91,6 +111,100 @@ export function applyTextChanges(text: string, changes: ReadonlyArray<ts.TextCha
   return out;
 }
 
+interface SpecifierList {
+  /** Offset just past the last specifier, i.e. where a trailing comma would go. */
+  readonly end: number;
+  readonly isMultiLine: boolean;
+  readonly hasTrailingComma: boolean;
+}
+
+function scriptKindFor(filename: string): ts.ScriptKind {
+  return filename.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS;
+}
+
+/** Every `{ ... }` specifier list of a top-level import/export declaration. */
+function namedSpecifierLists(text: string, filename: string): SpecifierList[] {
+  const sourceFile = ts.createSourceFile(
+    filename,
+    text,
+    ts.ScriptTarget.Latest,
+    true,
+    scriptKindFor(filename)
+  );
+
+  const lists: SpecifierList[] = [];
+  for (const statement of sourceFile.statements) {
+    let clause: ts.NamedImports | ts.NamedExports | undefined;
+
+    if (ts.isImportDeclaration(statement)) {
+      const bindings = statement.importClause?.namedBindings;
+      if (bindings !== undefined && ts.isNamedImports(bindings)) {
+        clause = bindings;
+      }
+    } else if (ts.isExportDeclaration(statement)) {
+      const { exportClause } = statement;
+      if (exportClause !== undefined && ts.isNamedExports(exportClause)) {
+        clause = exportClause;
+      }
+    }
+
+    if (clause === undefined || clause.elements.length === 0) {
+      continue;
+    }
+
+    const startLine = sourceFile.getLineAndCharacterOfPosition(clause.getStart(sourceFile)).line;
+    const endLine = sourceFile.getLineAndCharacterOfPosition(clause.getEnd()).line;
+
+    lists.push({
+      end: clause.elements.end,
+      isMultiLine: endLine > startLine,
+      hasTrailingComma: clause.elements.hasTrailingComma ?? false,
+    });
+  }
+
+  return lists;
+}
+
+/**
+ * TypeScript's printer reprints *export* declarations through the emitter, which never emits
+ * a trailing comma — import declarations are left verbatim, exports are not. A formatter set
+ * to `trailingComma: "es5"` (prettier, oxfmt) immediately puts the comma back, so the rule and
+ * the formatter would rewrite each other forever. Restoring the file's own convention makes
+ * the two converge, and usually means we report nothing at all.
+ *
+ * Only lists inside the rewritten region are touched, and only when the file already uses
+ * trailing commas in multi-line lists. Single-line lists are left alone: formatters strip
+ * trailing commas there anyway, so following the emitter is the converging choice.
+ */
+function restoreTrailingCommas(
+  organized: string,
+  original: string,
+  filename: string,
+  from: number,
+  to: number
+): string {
+  const usesTrailingCommas = namedSpecifierLists(original, filename).some(
+    (list) => list.isMultiLine && list.hasTrailingComma
+  );
+  if (!usesTrailingCommas) {
+    return organized;
+  }
+
+  const insertAt = namedSpecifierLists(organized, filename)
+    .filter(
+      (list) => list.isMultiLine && !list.hasTrailingComma && list.end >= from && list.end <= to
+    )
+    .map((list) => list.end)
+    .toSorted((a, b) => b - a);
+
+  let out = organized;
+  for (const at of insertAt) {
+    out = `${out.slice(0, at)},${out.slice(at)}`;
+  }
+
+  return out;
+}
+
 /**
  * Run the language service's `organizeImports` on one file and collapse the result into a
  * single ranged replacement, or `null` if the file is already organized.
@@ -128,7 +242,14 @@ export function organizeFile(
   const start = Math.min(...textChanges.map((change) => change.span.start));
   const end = Math.max(...textChanges.map((change) => change.span.start + change.span.length));
 
-  const organized = applyTextChanges(text, textChanges);
+  const emitted = applyTextChanges(text, textChanges);
+  const organized = restoreTrailingCommas(
+    emitted,
+    text,
+    filename,
+    start,
+    end + (emitted.length - text.length)
+  );
 
   // Everything before `start` is untouched, so it lines up in both strings. Everything after
   // `end` is untouched but shifted by the net length change, so the rewritten region ends at

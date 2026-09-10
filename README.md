@@ -43,6 +43,8 @@ oxlint --fix-suggestions  # apply the fix (see Fixes vs. suggestions)
 
 Only `.ts`, `.tsx`, `.mts`, and `.cts` files are handled. Everything else is skipped.
 
+Re-`export` declarations (`export { … } from '…'`) are sorted and merged as well — that is part of what the editor command does, not an extra.
+
 ### Ignoring a file
 
 Add the marker anywhere in the file — the same convention `prettier-plugin-organize-imports` uses:
@@ -50,6 +52,8 @@ Add the marker anywhere in the file — the same convention `prettier-plugin-org
 ```ts
 // organize-imports-ignore
 ```
+
+The marker is matched anywhere in the file, including inside strings and comments — the same loose check `prettier-plugin-organize-imports` uses. A file that merely _mentions_ it opts itself out.
 
 ## Options
 
@@ -85,6 +89,8 @@ Add the marker anywhere in the file — the same convention `prettier-plugin-org
 `tabWidth` and `useTabs` only take effect on import declarations that span multiple lines; single-line imports are reprinted as-is.
 
 Quote style is **always preserved**. `organizeImports` reprints existing declarations verbatim, so it never rewrites module-specifier quotes — even mixed quotes survive untouched. There is deliberately no `quotePreference` option, because the language service ignores it for this operation.
+
+Trailing commas are preserved too, but that one needs help: TypeScript reprints _export_ declarations through its emitter, which never emits a trailing comma (import declarations are left byte-for-byte alone). The plugin restores the file's own convention afterwards, so a multi-line list written with a trailing comma keeps it. Without that, every already-sorted file using `trailingComma: "es5"` would report forever and fight the formatter.
 
 ## Fixes vs. suggestions
 
@@ -136,7 +142,9 @@ A TypeScript 7 backend would need a **synchronous** LSP client, because oxlint's
 
 If all you want is deterministic import order and you do not need editor parity, `oxfmt` is faster and has no TypeScript dependency. Use this plugin when you want what the editor does — in particular when migrating off `prettier-plugin-organize-imports`.
 
-Running both is not recommended: they will disagree about ordering.
+Running both is not recommended: they will disagree about ordering, and because each one "fixes" the other's output they can ping-pong indefinitely. In practice the two agree far more often than you would expect — a sweep of faker's whole source tree against its `sortImports` group config found no disagreements at all. But at least one case diverges permanently: a bare index import (`from '.'`) goes last for oxfmt, which treats `index` as its own trailing group, and first for tsserver, which just sorts `'.'` lexicographically among the relative specifiers. If your codebase uses bare index imports, pick one tool.
+
+(Thanks to the faker maintainers' session for stress-testing this — the trailing-comma bug and the index-import case both came out of a real run against faker.)
 
 Oxlint itself does not ship this: [oxc-project/oxc#26521](https://github.com/oxc-project/oxc/issues/26521) was closed as not planned, with the recommendation to write a third-party JS plugin. This is that plugin.
 
@@ -145,6 +153,7 @@ Oxlint itself does not ship this: [oxc-project/oxc#26521](https://github.com/oxc
 - One `ts.LanguageService` is created per discovered `tsconfig.json` in `createOnce`, and reused for every file in the run.
 - The `LanguageServiceHost` reports only the **current** file from `getScriptFileNames`, so TypeScript builds a single-file program. `organizeImports` needs the binder and the local checker, not a project-wide type graph. This is the same trick `prettier-plugin-organize-imports` and `organize-imports-cli` use, and it is what keeps the plugin fast enough to run per-file inside a linter.
 - Your `tsconfig.json` is honoured. This matters more than it sounds: under `"jsx": "react"` a `React` import is used by the JSX factory and is kept, while under `"jsx": "react-jsx"` the same import is genuinely unused and gets removed.
+- The program is built with `noResolve`. `organizeImports` decides what is unused from the file's _local_ reference graph and never needs the types behind a module specifier, so there is no reason to load and parse every transitively imported file. This is worth well over an order of magnitude, for identical output — see [BENCHMARKS.md](./BENCHMARKS.md).
 - The scattered text changes TypeScript returns are collapsed into a single ranged replacement.
 - Line endings are detected from the file, so CRLF files do not come back with mixed endings.
 
@@ -152,7 +161,7 @@ Oxlint itself does not ship this: [oxc-project/oxc#26521](https://github.com/oxc
 
 - **TypeScript only.** Vue, Svelte, and Angular templates are out of scope: oxlint JS plugins do not support custom parsers yet.
 - **TypeScript 7 is not supported.** See above.
-- The plugin shells out to the TypeScript language service per file, so it is meaningfully slower than a native oxlint rule. It is still a single-file program per check, not a full project build.
+- The plugin drives the TypeScript language service per file, so it is slower than a native oxlint rule. It builds a single-file program per check rather than a full project build, and with `noResolve` the per-file cost is small enough to disappear next to a type-aware lint — [BENCHMARKS.md](./BENCHMARKS.md) has current figures.
 
 ## Development
 
@@ -166,7 +175,11 @@ pnpm run lint        # oxlint, type-aware
 pnpm run format      # oxfmt
 pnpm run ts-check    # tsc --noEmit
 pnpm run preflight   # everything, in order
+pnpm run benchmark -- <repo>   # see BENCHMARKS.md
 ```
+
+> [!WARNING]
+> Do not verify the TypeScript 7 guard with a `link:` install. A linked plugin is a symlink, so Node resolves `typescript` from the plugin's own `node_modules` rather than the consumer's, and the guard never sees the TypeScript it is supposed to reject. Use `pnpm pack` and install the tarball instead. See [BENCHMARKS.md](./BENCHMARKS.md).
 
 This repo lints itself with its own plugin: `oxlint-plugin-organize-imports` is a `link:.` devDependency and `organize-imports/organize-imports` is enabled in `.oxlintrc.json`. That is also why oxfmt's `sortImports` is switched **off** here — running both would mean two tools disagreeing about order, exactly as warned above. `pnpm run lint` therefore needs `pnpm run build` to have run first.
 

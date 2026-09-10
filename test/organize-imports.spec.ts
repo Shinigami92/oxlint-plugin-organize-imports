@@ -314,6 +314,153 @@ describe('import type', () => {
   });
 });
 
+describe('export declarations', () => {
+  const EXPORT_MODULES = {
+    'src/a.ts': 'export const a = 1;\nexport const a2 = 11;\n',
+    'src/b.ts': 'export const b = 2;\nexport const b2 = 22;\n',
+    'src/c.ts': 'export const c = 3;\n',
+  };
+
+  it('sorts export declarations', () => {
+    const p = project({
+      files: {
+        ...EXPORT_MODULES,
+        'entry.ts': `export { c } from './src/c';\nexport { a } from './src/a';\nexport { b } from './src/b';\n`,
+      },
+    });
+
+    p.lint('--fix-suggestions', 'entry.ts');
+    expect(p.read('entry.ts')).toBe(
+      `export { a } from './src/a';\nexport { b } from './src/b';\nexport { c } from './src/c';\n`
+    );
+  });
+
+  it('merges duplicate export declarations', () => {
+    const p = project({
+      files: {
+        ...EXPORT_MODULES,
+        'entry.ts': `export { a } from './src/a';\nexport { a2 } from './src/a';\n`,
+      },
+    });
+
+    p.lint('--fix-suggestions', 'entry.ts');
+    expect(p.read('entry.ts')).toBe(`export { a, a2 } from './src/a';\n`);
+  });
+
+  // TypeScript reprints export declarations through its emitter, which never emits a trailing
+  // comma. Left alone that produces a phantom diagnostic on every already-sorted file, and an
+  // endless fight with any formatter set to `trailingComma: "es5"`.
+  it('does not report an organized export list that uses a trailing comma', () => {
+    const source = `export {\n  a,\n  a2,\n} from './src/a';\n`;
+    const p = project({ files: { ...EXPORT_MODULES, 'entry.ts': source } });
+
+    expect(p.diagnostics('entry.ts')).toEqual([]);
+    expect(p.lint('--fix', 'entry.ts').status).toBe(0);
+    expect(p.read('entry.ts')).toBe(source);
+  });
+
+  it('keeps the trailing comma when it does reorder a multi-line export list', () => {
+    const p = project({
+      files: {
+        ...EXPORT_MODULES,
+        'entry.ts': `export { c } from './src/c';\nexport {\n  a,\n  a2,\n} from './src/a';\n`,
+      },
+    });
+
+    p.lint('--fix-suggestions', 'entry.ts');
+    expect(p.read('entry.ts')).toBe(
+      `export {\n  a,\n  a2,\n} from './src/a';\nexport { c } from './src/c';\n`
+    );
+  });
+
+  it('does not invent trailing commas in a file that does not use them', () => {
+    const p = project({
+      files: {
+        ...EXPORT_MODULES,
+        'entry.ts': `export { c } from './src/c';\nexport {\n  a,\n  a2\n} from './src/a';\n`,
+      },
+    });
+
+    p.lint('--fix-suggestions', 'entry.ts');
+    expect(p.read('entry.ts')).toBe(
+      `export {\n  a,\n  a2\n} from './src/a';\nexport { c } from './src/c';\n`
+    );
+  });
+
+  it('leaves a multi-line import list with a trailing comma alone', () => {
+    const source = `import {\n  a,\n  a2,\n} from './src/a';\n\nconsole.log(a, a2);\n`;
+    const p = project({ files: { ...EXPORT_MODULES, 'entry.ts': source } });
+
+    expect(p.diagnostics('entry.ts')).toEqual([]);
+  });
+});
+
+// faker has no bare index imports, so it cannot regression-test this path. It is the one
+// place tsserver and oxfmt's `sortImports` permanently disagree: oxfmt puts `index` in its
+// own trailing group, tsserver just sorts '.' lexicographically, which puts it first.
+describe('index imports', () => {
+  it('sorts a bare index import ahead of the other relative imports', () => {
+    const p = project({
+      files: {
+        'index.ts': 'export const root = 0;\n',
+        'src/a.ts': 'export const a = 1;\n',
+        'src/b.ts': 'export const b = 2;\n',
+        'entry.ts': `import { b } from './src/b';\nimport { root } from '.';\nimport { a } from './src/a';\n\nconsole.log(a, b, root);\n`,
+      },
+    });
+
+    p.lint('--fix-suggestions', 'entry.ts');
+    expect(p.read('entry.ts')).toBe(
+      `import { root } from '.';\nimport { a } from './src/a';\nimport { b } from './src/b';\n\nconsole.log(a, b, root);\n`
+    );
+  });
+});
+
+// The program is built with `noResolve`, so TypeScript never loads the modules behind these
+// specifiers. Unused-import removal has to keep working off the local reference graph alone,
+// and an import that cannot be resolved must never be mistaken for a dead one.
+describe('modules that do not resolve', () => {
+  it('still removes an unused named import', () => {
+    const p = project({
+      files: {
+        'entry.ts': `import { used, unused } from './nope-does-not-exist';\n\nconsole.log(used);\n`,
+      },
+    });
+
+    p.lint('--fix-suggestions', 'entry.ts');
+    expect(p.read('entry.ts')).toBe(
+      `import { used } from './nope-does-not-exist';\n\nconsole.log(used);\n`
+    );
+  });
+
+  it('still removes an unused default import', () => {
+    const p = project({
+      files: { 'entry.ts': `import Def, { keep } from './missing-mod';\n\nconsole.log(keep);\n` },
+    });
+
+    p.lint('--fix-suggestions', 'entry.ts');
+    expect(p.read('entry.ts')).toBe(
+      `import { keep } from './missing-mod';\n\nconsole.log(keep);\n`
+    );
+  });
+
+  it('keeps a side-effect import of an unresolvable module', () => {
+    const source = `import './missing-side-effect';\nimport { b } from './src/b';\n\nconsole.log(b);\n`;
+    const p = project({ files: { 'src/b.ts': 'export const b = 2;\n', 'entry.ts': source } });
+
+    expect(p.diagnostics('entry.ts')).toEqual([]);
+    expect(p.read('entry.ts')).toBe(source);
+  });
+
+  it('keeps a type-only import that is only used in a type alias', () => {
+    const source = `import type { T } from './missing-types';\n\nexport type Alias = T;\n`;
+    const p = project({ files: { 'entry.ts': source } });
+
+    expect(p.diagnostics('entry.ts')).toEqual([]);
+    expect(p.read('entry.ts')).toBe(source);
+  });
+});
+
 describe('tsx', () => {
   const TSX_FILES = {
     'src/helper.ts': 'export const helper = 1;\n',

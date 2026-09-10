@@ -1,15 +1,10 @@
-import path from 'node:path';
-import { defineRule } from '@oxlint/plugins';
 import type { ESTree, Fixer } from '@oxlint/plugins';
+import { defineRule } from '@oxlint/plugins';
+import path from 'node:path';
 import ts from 'typescript';
 import { createServiceCache, organizeFile, resolveSettings } from './core';
+import { isOrganizable } from './eligibility';
 import type { RuleOptions, Settings } from './types';
-
-/** Files containing this marker are left alone (same convention as `prettier-plugin-organize-imports`). */
-const IGNORE_MARKER = '// organize-imports-ignore';
-
-/** The language service only handles TypeScript here; oxlint has no custom-parser support yet. */
-const TS_FILE = /\.(?:m|c)?tsx?$/u;
 
 export const organizeImportsRule = defineRule({
   meta: {
@@ -44,12 +39,8 @@ export const organizeImportsRule = defineRule({
 
     return {
       before(): boolean {
-        if (!TS_FILE.test(context.filename)) {
-          return false;
-        }
-
         const text = context.sourceCode.text;
-        if (text.includes(IGNORE_MARKER)) {
+        if (!isOrganizable(context.filename, text)) {
           return false;
         }
 

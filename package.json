@@ -11,6 +11,7 @@
     "ts-check": "tsc",
     "test": "vitest",
     "test:coverage": "vitest run --coverage",
+    "benchmark": "tsx ./scripts/benchmark.ts",
     "prepublishOnly": "pnpm run clean && pnpm install && pnpm run build",
     "preflight": "pnpm install && run-s format build lint test ts-check"
   },
@@ -62,6 +63,7 @@
     "oxlint-tsgolint": "7.0.2001",
     "publint": "0.3.24",
     "tsdown": "0.23.0",
+    "tsx": "4.23.13",
     "typescript": "6.0.3",
     "vitest": "5.0.0"
   },
