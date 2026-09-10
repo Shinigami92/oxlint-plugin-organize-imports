@@ -183,6 +183,21 @@ pnpm run benchmark -- <repo>   # see BENCHMARKS.md
 
 This repo lints itself with its own plugin: `oxlint-plugin-organize-imports` is a `link:.` devDependency and `organize-imports/organize-imports` is enabled in `.oxlintrc.json`. That is also why oxfmt's `sortImports` is switched **off** here — running both would mean two tools disagreeing about order, exactly as warned above. `pnpm run lint` therefore needs `pnpm run build` to have run first.
 
+## Releasing
+
+Releases are cut by hand and published by CI — there is no changelog tooling; release notes
+live in [GitHub Releases](https://github.com/Shinigami92/oxlint-plugin-organize-imports/releases).
+
+1. Bump `version` in `package.json` and merge that to `main`.
+2. Wait for CI to be green on `main`.
+3. Run the **Publish** workflow (`workflow_dispatch`). It refuses to run off `main`,
+   derives the dist-tag from the version (`1.2.3-beta.4` publishes under `beta`), and
+   publishes with [provenance](https://docs.npmjs.com/generating-provenance-statements).
+4. Draft the GitHub Release for the tag.
+
+`prepublishOnly` runs `clean` + `install` + `build`, so the tarball is always built from a
+pristine tree rather than whatever happened to be in `dist/`.
+
 ## License
 
 [MIT](./LICENSE)

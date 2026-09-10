@@ -1,6 +1,6 @@
 {
   "name": "oxlint-plugin-organize-imports",
-  "version": "0.0.0",
+  "version": "0.1.0",
   "description": "Oxlint plugin that organizes imports using the TypeScript language service, matching the editor's 'Organize Imports'",
   "scripts": {
     "clean": "git clean -fdx --exclude .claude --exclude local",
