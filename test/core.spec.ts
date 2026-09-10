@@ -1,3 +1,5 @@
+import fs from 'node:fs';
+import path from 'node:path';
 import type ts from 'typescript';
 import { afterAll, describe, expect, it } from 'vitest';
 import { applyTextChanges, createServiceCache, resolveSettings } from '../src/core';
@@ -196,6 +198,52 @@ describe('organizeFile', () => {
 
       expect(state.version).toBe(2);
       expect(state.file.endsWith('two.ts')).toBe(true);
+    });
+  });
+
+  describe('script paths', () => {
+    const text = 'import { b } from "./b";\nimport { a } from "./a";\n\nconsole.log(a, b);\n';
+    const organized = 'import { a } from "./a";\nimport { b } from "./b";\n\nconsole.log(a, b);\n';
+
+    // The language service normalises every path before calling back into the host, so the
+    // host has to store the normalised form or `getScriptSnapshot` never matches. On Windows
+    // that used to miss on *every* file, because `path.resolve` yields backslashes there.
+    // These cases reproduce the same mismatch on any platform.
+    it('organizes a path containing a "." segment', () => {
+      expect(organizeText(text, { filename: '/virtual/./file.ts' })).toBe(organized);
+    });
+
+    it('organizes a path containing a ".." segment', () => {
+      expect(organizeText(text, { filename: '/virtual/sub/../file.ts' })).toBe(organized);
+    });
+
+    it('organizes a path containing redundant separators', () => {
+      expect(organizeText(text, { filename: '/virtual//file.ts' })).toBe(organized);
+    });
+
+    it('stores the normalized path, not the one it was handed', () => {
+      const getService = createServiceCache();
+
+      organize(text, { getService, filename: '/virtual/sub/../file.ts' });
+
+      expect(getService(null).state.file).toBe('/virtual/file.ts');
+    });
+
+    it('reads the text it was handed, not the file on disk', () => {
+      const created = createTsconfigProject({});
+      // Same import names, opposite order: if the snapshot missed and the host fell through
+      // to `ts.sys.readFile`, this file is what would get organized, and it is already sorted
+      // — so the call would report no change at all.
+      fs.writeFileSync(
+        path.join(created.dir, 'disk.ts'),
+        'import { a } from "./a";\nimport { b } from "./b";\n\nconsole.log(a, b);\n'
+      );
+
+      try {
+        expect(created.organizeText(text, { filename: 'disk.ts' })).toBe(organized);
+      } finally {
+        created.dispose();
+      }
     });
   });
 });
