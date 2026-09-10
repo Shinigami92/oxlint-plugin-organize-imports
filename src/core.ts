@@ -16,6 +16,20 @@ import { assertLanguageServiceAvailable } from './typescript-support';
 const PERFORMANCE_OPTIONS: ts.CompilerOptions = { noResolve: true };
 
 /**
+ * The path form TypeScript itself produces: separators forward, `.` and `..` resolved.
+ *
+ * The language service normalises every path before handing it to the host, so a host that
+ * keeps the caller's raw string compares against something TypeScript never emits. On Windows
+ * that is *every* path, because `path.resolve` yields backslashes there — `getScriptSnapshot`
+ * then misses, the file never enters the program, and `organizeImports` throws
+ * `Could not find source file`. Case is preserved by the language service, so this
+ * deliberately does not fold it.
+ */
+function normalizeFileName(filename: string): string {
+  return path.resolve(filename).replaceAll('\\', '/');
+}
+
+/**
  * One `LanguageService` per tsconfig, reused for every file in the run.
  *
  * The host only ever reports the *current* file as a root, so TypeScript builds a
@@ -222,14 +236,18 @@ export function organizeFile(
   text: string,
   settings: Settings
 ): Edit | null {
+  // Once, here: everything downstream — `state.file`, `getScriptFileNames`, and the name the
+  // service is asked about — has to be the same string the host will be called back with.
+  const file = normalizeFileName(filename);
+
   const { service, state } = getService(tsconfigPath);
-  state.file = filename;
+  state.file = file;
   state.text = text;
-  state.cwd = path.dirname(filename);
+  state.cwd = path.dirname(file);
   state.version++;
 
   const [changes] = service.organizeImports(
-    { type: 'file', fileName: filename, mode: ts.OrganizeImportsMode[settings.mode] },
+    { type: 'file', fileName: file, mode: ts.OrganizeImportsMode[settings.mode] },
     settings.formatOptions,
     settings.preferences
   );
@@ -246,7 +264,7 @@ export function organizeFile(
   const organized = restoreTrailingCommas(
     emitted,
     text,
-    filename,
+    file,
     start,
     end + (emitted.length - text.length)
   );
