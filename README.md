@@ -157,6 +157,53 @@ Oxlint itself does not ship this: [oxc-project/oxc#26521](https://github.com/oxc
 - The scattered text changes TypeScript returns are collapsed into a single ranged replacement.
 - Line endings are detected from the file, so CRLF files do not come back with mixed endings.
 
+## Interaction with other rules and tools
+
+This rule rewrites the whole import block, so it overlaps with anything else that sorts,
+merges, or prunes imports. Two different kinds of overlap, with different fixes.
+
+### Turn these off — they impose a different order
+
+| Tool                             | Why                                                                                                                                  |
+| -------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| oxfmt `sortImports`              | A different ordering algorithm. See [above](#how-this-differs-from-oxfmts-sortimports).                                              |
+| `sort-imports` (default options) | Orders by _member syntax_ first (`none`, `all`, `multiple`, `single`), where the language service orders purely by module specifier. |
+
+`sort-imports` is worth spelling out, because a file this rule considers perfectly organized
+still fails it:
+
+```ts
+import { onlyOne } from './src/a';
+import './src/side';
+import { x, y } from './src/z';
+```
+
+```
+error eslint(sort-imports): Expected 'None' syntax before 'Single' syntax.
+```
+
+Setting `"sort-imports": ["error", { "ignoreDeclarationSort": true }]` resolves it: the
+declaration order is then left to this rule, and only the order of names _inside_ each `{ … }`
+is checked — which the language service already agrees with, including its case handling.
+
+### Keep these, but expect a second diagnostic
+
+`no-unused-vars` reports the same unused import this rule removes, so until you apply the fix
+you see both:
+
+```
+error eslint(no-unused-vars): Identifier 'unusedThing' is imported but never used.
+error organize-imports(organize-imports): Imports are not organized.
+```
+
+Leave it on anyway — it also catches unused locals, parameters and caught errors, which this
+rule knows nothing about, and one fix satisfies both.
+
+`no-duplicate-imports` and `import/no-duplicates` are a different matter: in the default `All`
+mode, and in `SortAndCombine`, this rule _merges_ duplicate specifiers, so both are fully
+redundant and can be switched off. Keep them if you run `RemoveUnused`, which removes unused
+imports without merging anything.
+
 ## Limitations
 
 - **TypeScript only.** Vue, Svelte, and Angular templates are out of scope: oxlint JS plugins do not support custom parsers yet.
