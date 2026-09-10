@@ -1,0 +1,85 @@
+{
+  "$schema": "https://docs.renovatebot.com/renovate-schema.json",
+  "extends": [
+    "config:best-practices",
+    "schedule:earlyMondays",
+    "group:allNonMajor",
+    ":prHourlyLimitNone",
+    "helpers:disableTypesNodeMajor"
+  ],
+  "labels": ["c: dependencies"],
+  "lockFileMaintenance": {
+    "enabled": true
+  },
+  "reviewersFromCodeOwners": true,
+  "rangeStrategy": "bump",
+  "packageRules": [
+    {
+      "groupName": "devDependencies",
+      "matchDepTypes": ["devDependencies"],
+      "rangeStrategy": "bump",
+      "minimumReleaseAge": null
+    },
+    {
+      "groupName": "dependencies",
+      "matchDepTypes": ["dependencies"],
+      "rangeStrategy": "replace"
+    },
+    {
+      "groupName": "peerDependencies",
+      "matchDepTypes": ["peerDependencies"],
+      "rangeStrategy": "widen"
+    },
+    {
+      "groupName": "engines",
+      "matchDepTypes": ["engines"],
+      "rangeStrategy": "replace",
+      "minimumReleaseAge": null
+    },
+    {
+      "groupName": "pnpm",
+      "matchPackageNames": ["pnpm"]
+    },
+    {
+      // `@oxlint/plugins` ships in lockstep with `oxlint` and must match the runtime that
+      // loads the plugin, so they have to move together in one PR.
+      "groupName": "oxlint",
+      "matchPackageNames": ["@oxlint/plugins", "oxlint", "oxlint-tsgolint"],
+      "minimumReleaseAge": null
+    },
+    {
+      "groupName": "vitest",
+      "matchPackageNames": ["@vitest/**", "vitest"],
+      "minimumReleaseAge": null
+    },
+    {
+      "groupName": "oxfmt",
+      "matchPackageNames": ["oxfmt"],
+      "minimumReleaseAge": null
+    },
+    {
+      // TypeScript 7 (the Go port) dropped the JavaScript language service, which is the
+      // entire engine behind this plugin — see the README. Pinning below 7 stops Renovate
+      // both from bumping the devDependency to a version the tests cannot run on, and from
+      // widening the `typescript` peerDependency to advertise support we do not have.
+      "groupName": "typescript",
+      "matchPackageNames": ["typescript"],
+      "allowedVersions": "<7"
+    }
+  ],
+  "customManagers": [
+    {
+      "customType": "regex",
+      "managerFilePatterns": ["/^package\\.json$/"],
+      "matchStrings": [
+        "\"devEngines\"\\s*:\\s*\\{\\s*\"packageManager\"\\s*:\\s*\\{[^}]*?\"name\"\\s*:\\s*\"(?<depName>[^\"]+)\"[^}]*?\"version\"\\s*:\\s*\"(?<currentValue>[^\"]+)\""
+      ],
+      "datasourceTemplate": "npm",
+      "depTypeTemplate": "devEngines"
+    }
+  ],
+  "vulnerabilityAlerts": {
+    "labels": ["c: security"],
+    "assignees": ["@Shinigami92"]
+  }
+}
