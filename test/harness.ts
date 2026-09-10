@@ -7,7 +7,10 @@ import { fileURLToPath } from 'node:url';
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
 
 const PLUGIN_ENTRY = path.join(repoRoot, 'dist', 'index.js');
-const OXLINT_BIN = path.join(repoRoot, 'node_modules', '.bin', 'oxlint');
+// The package's own entry, not the `node_modules/.bin` shim: on Windows that shim is a
+// `.CMD` file, which `spawnSync` refuses to execute without a shell. The entry is a plain
+// Node script, so running it with the current Node binary behaves the same everywhere.
+const OXLINT_ENTRY = path.join(repoRoot, 'node_modules', 'oxlint', 'bin', 'oxlint');
 
 export const RULE_ID = 'organize-imports/organize-imports';
 
@@ -111,9 +114,9 @@ export function createProject({ files, compilerOptions, ruleOptions }: ProjectSe
 
   function lint(...args: string[]): LintResult {
     const result = spawnSync(
-      OXLINT_BIN,
+      process.execPath,
       // Silence every built-in rule, so assertions only ever see this plugin.
-      ['-A', 'all', '-D', RULE_ID, ...args],
+      [OXLINT_ENTRY, '-A', 'all', '-D', RULE_ID, ...args],
       { cwd: dir, encoding: 'utf8' }
     );
 
