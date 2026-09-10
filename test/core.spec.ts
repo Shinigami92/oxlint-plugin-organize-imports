@@ -221,12 +221,20 @@ describe('organizeFile', () => {
       expect(organizeText(text, { filename: '/virtual//file.ts' })).toBe(organized);
     });
 
-    it('stores the normalized path, not the one it was handed', () => {
-      const getService = createServiceCache();
+    it('stores one path however the caller spelled it', () => {
+      const viaNormalized = createServiceCache();
+      const viaMessy = createServiceCache();
 
-      organize(text, { getService, filename: '/virtual/sub/../file.ts' });
+      organize(text, { getService: viaNormalized, filename: '/virtual/file.ts' });
+      organize(text, { getService: viaMessy, filename: '/virtual/sub/../file.ts' });
 
-      expect(getService(null).state.file).toBe('/virtual/file.ts');
+      // Deliberately not compared against a literal: `path.resolve` anchors a rooted POSIX
+      // path to the current drive on Windows, so the absolute form is `D:/virtual/file.ts`
+      // there. What has to hold on every platform is that both spellings land on the same
+      // string, and that the separators are the ones the language service hands back.
+      expect(viaMessy(null).state.file).toBe(viaNormalized(null).state.file);
+      expect(viaMessy(null).state.file).not.toContain('\\');
+      expect(viaMessy(null).state.file.endsWith('/virtual/file.ts')).toBe(true);
     });
 
     it('reads the text it was handed, not the file on disk', () => {
