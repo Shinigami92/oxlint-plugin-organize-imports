@@ -25,9 +25,6 @@ jobs:
         with:
           node-version: 26.8.1
           cache: 'pnpm'
-          # Needed so NODE_AUTH_TOKEN is written into .npmrc for the very first publish.
-          # Once trusted publishing is configured on npmjs.com this is redundant but harmless.
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Prepare
         run: pnpm install --frozen-lockfile
@@ -36,7 +33,3 @@ jobs:
         run: |
           PACKAGE_DIST_TAG=$(node -e "console.log(/^\d+\.\d+\.\d+(\-(\w+)\.\d+)$/.exec(require('./package.json').version)?.[2] || 'latest')")
           pnpm publish --access public --tag $PACKAGE_DIST_TAG --provenance
-        env:
-          # Only needed until this package exists on npm and a Trusted Publisher is
-          # configured for it. Delete the secret and this block afterwards — OIDC replaces it.
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
