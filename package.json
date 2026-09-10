@@ -1,62 +1,83 @@
 {
   "name": "oxlint-plugin-organize-imports",
   "version": "0.0.0",
-  "description": "Oxlint plugin that organizes imports using the TypeScript language service, matching the editor's 'Organize Imports' command.",
+  "description": "Oxlint plugin that organizes imports using the TypeScript language service, matching the editor's 'Organize Imports'",
+  "scripts": {
+    "clean": "git clean -fdx --exclude .claude --exclude local",
+    "build": "tsdown",
+    "format": "oxfmt",
+    "format:check": "oxfmt --check",
+    "lint": "oxlint",
+    "ts-check": "tsc",
+    "test": "vitest",
+    "test:coverage": "vitest run --coverage",
+    "prepublishOnly": "pnpm run clean && pnpm install && pnpm run build",
+    "preflight": "pnpm install && run-s format build lint test ts-check"
+  },
   "keywords": [
     "imports",
     "linter",
     "organize-imports",
+    "oxc",
     "oxlint",
     "oxlint-plugin",
+    "sort-imports",
     "typescript"
   ],
-  "homepage": "https://github.com/Shinigami92/oxlint-plugin-organize-imports#readme",
-  "bugs": "https://github.com/Shinigami92/oxlint-plugin-organize-imports/issues",
-  "license": "MIT",
-  "author": "Christopher Quadflieg <shinigami92@gmail.com>",
+  "homepage": "https://github.com/Shinigami92/oxlint-plugin-organize-imports",
+  "bugs": {
+    "url": "https://github.com/Shinigami92/oxlint-plugin-organize-imports/issues"
+  },
   "repository": {
     "type": "git",
     "url": "git+https://github.com/Shinigami92/oxlint-plugin-organize-imports.git"
   },
-  "files": [
-    "src"
-  ],
+  "license": "MIT",
+  "author": "Christopher Quadflieg <shinigami92@gmail.com>",
+  "sideEffects": false,
   "type": "module",
-  "main": "./src/index.js",
-  "types": "./src/index.d.ts",
   "exports": {
     ".": {
-      "types": "./src/index.d.ts",
-      "default": "./src/index.js"
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
     },
     "./package.json": "./package.json"
   },
-  "scripts": {
-    "format": "oxfmt .",
-    "format:check": "oxfmt --check .",
-    "lint": "oxlint",
-    "test": "vitest run",
-    "test:watch": "vitest",
-    "typecheck": "tsc --noEmit",
-    "publint": "publint"
-  },
+  "main": "./dist/index.js",
+  "module": "./dist/index.js",
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist"
+  ],
   "dependencies": {
     "@oxlint/plugins": "^1.82.0"
   },
   "devDependencies": {
-    "@types/node": "^22.20.1",
-    "oxfmt": "^0.67.0",
-    "oxlint": "^1.82.0",
-    "publint": "^0.3.24",
-    "typescript": "^6.0.3",
-    "vitest": "^5.0.0"
+    "@types/node": "26.5.1",
+    "@vitest/coverage-v8": "5.0.0",
+    "npm-run-all2": "9.0.3",
+    "oxfmt": "0.67.0",
+    "oxlint": "1.82.0",
+    "oxlint-plugin-organize-imports": "link:.",
+    "oxlint-tsgolint": "7.0.2001",
+    "publint": "0.3.24",
+    "tsdown": "0.23.0",
+    "typescript": "6.0.3",
+    "vitest": "5.0.0"
   },
   "peerDependencies": {
     "oxlint": "^1.0.0",
     "typescript": "^5 || ^6"
   },
+  "packageManager": "pnpm@12.3.4",
   "engines": {
     "node": ">=24"
   },
-  "packageManager": "pnpm@12.3.4"
+  "devEngines": {
+    "packageManager": {
+      "name": "pnpm",
+      "version": "12.3.4",
+      "onFail": "download"
+    }
+  }
 }

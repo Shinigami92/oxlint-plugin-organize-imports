@@ -1,3 +1,46 @@
-node_modules/
+# Logs
+logs
 *.log
+npm-debug.log*
+
+# Diagnostic reports (https://nodejs.org/api/report.html)
+report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
+reports/
+
+# Coverage directory used by tools like istanbul
+coverage
+*.lcov
+
+# Dependency directories
+node_modules/
+.pnpm-store/
+
+# TypeScript cache
+*.tsbuildinfo
+
+# Dist
+/dist
+
+# IDE
+/.idea
+/nbproject
+
+# Unwanted package managers
+package-lock.json
+yarn.lock
+
+TAGS
+REVISION
+*.tmproj
+*~
 .DS_Store
+.settings
+.project
+.history
+
+# AI
+.claude/
+
+# local scratch
+local/
+tmp/

@@ -2,63 +2,112 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches:
+      - main
   pull_request:
+  merge_group:
+
+permissions:
+  contents: read # to fetch code (actions/checkout)
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
-  check:
-    name: Lint, format, types
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v5
-
-      - uses: pnpm/action-setup@v4
-
-      - uses: actions/setup-node@v5
-        with:
-          node-version: 24
-          cache: pnpm
-
-      - run: pnpm install --frozen-lockfile
-
-      - run: pnpm run lint
-
-      - run: pnpm run format:check
-
-      - run: pnpm run typecheck
-
-      - run: pnpm run publint
-
   test:
-    name: Node ${{ matrix.node }} / TypeScript ${{ matrix.typescript }}
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
-      fail-fast: false
       matrix:
-        node: [24, 26]
+        os: [ubuntu-latest]
+        node_version: [24, 26]
         # TypeScript 7 dropped the JS language service, so it is deliberately not tested:
-        # the plugin refuses to run on it. See README, "TypeScript version support".
-        typescript: ['5', '6']
+        # the plugin refuses to load on it by design. See README, "TypeScript version support".
+        typescript_version: ['5', '6']
+      fail-fast: false
+    timeout-minutes: 10
+
+    name: 'Build & Test: node-${{ matrix.node_version }}, ts-${{ matrix.typescript_version }}, ${{ matrix.os }}'
     steps:
-      - uses: actions/checkout@v5
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
 
-      - uses: pnpm/action-setup@v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
 
-      - uses: actions/setup-node@v5
+      - name: Set node version to ${{ matrix.node_version }}
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
-          node-version: ${{ matrix.node }}
-          cache: pnpm
+          node-version: ${{ matrix.node_version }}
+          cache: 'pnpm'
 
-      - run: pnpm install --frozen-lockfile
+      - name: Install deps
+        run: pnpm install
 
-      - name: Pin TypeScript ${{ matrix.typescript }}
-        run: pnpm add -D typescript@${{ matrix.typescript }}
+      - name: Pin TypeScript ${{ matrix.typescript_version }}
+        run: pnpm add -D typescript@${{ matrix.typescript_version }}
 
       - name: Report resolved TypeScript
         run: pnpm exec tsc --version
 
-      - run: pnpm run test
+      - name: Build
+        run: pnpm run build
+
+      - name: Test
+        run: pnpm run test
+
+  lint:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    name: 'Lint: node-24, ubuntu-latest'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Set node version to 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install deps
+        run: pnpm install
+
+      # The repo lints itself with its own plugin, so `dist/` has to exist first.
+      - name: Build
+        run: pnpm run build
+
+      - name: Lint
+        run: pnpm run lint --format=github
+
+      - name: Check formatting
+        run: pnpm run format:check
+
+  ts-check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    name: 'TS-Check: node-24, ubuntu-latest'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+
+      - name: Set node version to 24
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: 24
+          cache: 'pnpm'
+
+      - name: Install deps
+        run: pnpm install
+
+      - name: Build code (that includes types)
+        run: pnpm run build
+
+      - name: Check types
+        run: pnpm run ts-check

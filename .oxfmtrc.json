@@ -1,6 +1,19 @@
 {
   "$schema": "./node_modules/oxfmt/configuration_schema.json",
+  "ignorePatterns": [".claude/**", "coverage/**", "dist/**"],
   "singleQuote": true,
+  "trailingComma": "es5",
   "printWidth": 100,
-  "ignorePatterns": []
+  "sortPackageJson": false,
+  "sortImports": false,
+  "overrides": [
+    {
+      "files": ["*.json5"],
+      "options": {
+        "quoteProps": "preserve",
+        "singleQuote": false,
+        "trailingComma": "none"
+      }
+    }
+  ]
 }

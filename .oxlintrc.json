@@ -1,21 +1,82 @@
 {
   "$schema": "./node_modules/oxlint/configuration_schema.json",
-  "plugins": ["import", "node", "promise", "unicorn", "oxc", "typescript"],
+  "plugins": ["import", "oxc", "promise", "typescript", "unicorn", "vitest"],
+  "jsPlugins": ["oxlint-plugin-organize-imports"],
   "categories": {
     "correctness": "error",
-    "perf": "error",
     "suspicious": "error",
-    "pedantic": "warn"
+    "pedantic": "error",
+    "perf": "error",
+    "restriction": "off"
+  },
+  "options": {
+    "reportUnusedDisableDirectives": "error",
+    "typeAware": true,
+    "typeCheck": false
   },
   "env": {
-    "es2024": true,
+    "builtin": true,
     "node": true
   },
-  "ignorePatterns": ["node_modules"],
+  "ignorePatterns": ["**/coverage/**", "**/dist/**", "**/node_modules/**"],
   "rules": {
+    // Dogfooding: this plugin organizes its own imports. `sortImports` is switched off in
+    // `.oxfmtrc.json` on purpose — running both would mean two tools disagreeing about order.
+    "organize-imports/organize-imports": "error",
+
+    // --- eslint core ---
+    "curly": "error",
+    "eqeqeq": ["error", "always", { "null": "ignore" }],
+    "no-redeclare": "off", // not useful with typescript
+    "no-use-before-define": "error",
+    "prefer-template": "error",
+
+    // Pure style, no value for this codebase: short comments sit next to the line they explain.
     "no-inline-comments": "off",
+    // The rule and the language-service host are cohesive units; splitting them to satisfy a
+    // line count would make them harder to follow, not easier.
     "max-lines-per-function": "off",
     "max-lines": "off",
-    "sort-keys": "off"
-  }
+
+    // --- import ---
+    "import/consistent-type-specifier-style": ["error", "prefer-top-level"],
+
+    // --- typescript ---
+    "typescript/array-type": ["error", { "default": "array-simple", "readonly": "generic" }],
+    "typescript/consistent-type-imports": "error",
+    "typescript/explicit-module-boundary-types": "error",
+    "typescript/no-non-null-assertion": "error",
+    "typescript/prefer-find": "error",
+    "typescript/prefer-for-of": "error",
+    // Extremely noisy and of little value here; both faker and node-pg-migrate disable it.
+    "typescript/prefer-readonly-parameter-types": "off",
+    // Fires on every `ts.sys.*` host callback we hand to the language service. These are
+    // plain functions on a namespace object, not methods with `this`.
+    "typescript/unbound-method": "off",
+    // Rule options arrive as `JsonValue` and are already validated against `meta.schema`
+    // by oxlint before the rule sees them, so narrowing them is an assertion by nature.
+    "typescript/no-unsafe-type-assertion": "off",
+
+    // --- unicorn ---
+    "unicorn/filename-case": ["error", { "case": "kebabCase" }],
+    "unicorn/prefer-ternary": "error"
+  },
+  "overrides": [
+    {
+      "files": ["test/**/*.spec.ts"],
+      "rules": {
+        "typescript/restrict-template-expressions": [
+          "error",
+          { "allowNumber": true, "allowBoolean": true, "allowAny": true }
+        ],
+        "vitest/expect-expect": "off",
+        "vitest/no-alias-methods": "error",
+        "vitest/prefer-each": "error",
+        "vitest/prefer-to-have-length": "error",
+        "vitest/require-to-throw-message": "off",
+        "vitest/valid-expect": ["error", { "maxArgs": 2 }],
+        "vitest/warn-todo": "warn"
+      }
+    }
+  ]
 }

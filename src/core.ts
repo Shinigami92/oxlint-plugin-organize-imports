@@ -1,27 +1,7 @@
 import path from 'node:path';
 import ts from 'typescript';
-import { assertLanguageServiceAvailable } from './typescript-support.js';
-
-/**
- * @typedef {'All' | 'SortAndCombine' | 'RemoveUnused'} Mode
- *
- * @typedef {object} Settings
- * @property {Mode} mode
- * @property {boolean} destructive Whether the mode can remove imports, and so change behaviour.
- * @property {ts.FormatCodeSettings} formatOptions
- * @property {ts.UserPreferences} preferences
- *
- * @typedef {object} ServiceEntry
- * @property {ts.LanguageService} service
- * @property {{ file: string, text: string, version: number, cwd: string }} state
- *
- * @typedef {(tsconfigPath?: string | null) => ServiceEntry} GetService
- *
- * @typedef {object} Edit
- * @property {number} start
- * @property {number} end
- * @property {string} replacement
- */
+import type { Edit, GetService, Mode, RuleOptions, ServiceEntry, Settings } from './types';
+import { assertLanguageServiceAvailable } from './typescript-support';
 
 /**
  * One `LanguageService` per tsconfig, reused for every file in the run.
@@ -31,47 +11,47 @@ import { assertLanguageServiceAvailable } from './typescript-support.js';
  * project-wide type graph. This is the same trick `prettier-plugin-organize-imports` and
  * `organize-imports-cli` use, and it is what keeps the plugin fast enough to run per-file
  * inside a linter.
- *
- * @returns {GetService}
  */
-export function createServiceCache() {
+export function createServiceCache(): GetService {
   assertLanguageServiceAvailable();
 
-  /** @type {Map<string, ServiceEntry>} */
-  const services = new Map();
-  /** @type {Map<string, ts.CompilerOptions>} */
-  const compilerOptions = new Map();
+  const services = new Map<string, ServiceEntry>();
+  const compilerOptions = new Map<string, ts.CompilerOptions>();
 
-  /**
-   * @param {string | null | undefined} tsconfigPath
-   * @returns {ts.CompilerOptions}
-   */
-  function getCompilerOptions(tsconfigPath) {
-    if (!tsconfigPath) return { allowJs: true, allowNonTsExtensions: true };
+  function getCompilerOptions(tsconfigPath: string | null | undefined): ts.CompilerOptions {
+    if (tsconfigPath === undefined || tsconfigPath === null || tsconfigPath.length === 0) {
+      return { allowJs: true, allowNonTsExtensions: true };
+    }
 
     const cached = compilerOptions.get(tsconfigPath);
-    if (cached) return cached;
+    if (cached) {
+      return cached;
+    }
 
-    const { config } = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+    // `readConfigFile` types `config` as `any`; keep it opaque and hand it straight on.
+    const configFile = ts.readConfigFile(tsconfigPath, ts.sys.readFile);
+    const config: unknown = configFile.config;
     const { options } = ts.parseJsonConfigFileContent(
       config ?? {},
       ts.sys,
-      path.dirname(tsconfigPath),
+      path.dirname(tsconfigPath)
     );
     compilerOptions.set(tsconfigPath, options);
+
     return options;
   }
 
   return function getService(tsconfigPath) {
     const key = tsconfigPath ?? '';
     const cached = services.get(key);
-    if (cached) return cached;
+    if (cached) {
+      return cached;
+    }
 
     const state = { file: '', text: '', version: 0, cwd: '' };
     const options = getCompilerOptions(tsconfigPath);
 
-    /** @type {ts.LanguageServiceHost} */
-    const host = {
+    const host: ts.LanguageServiceHost = {
       getScriptFileNames: () => [state.file],
       getScriptVersion: () => String(state.version),
       getScriptSnapshot: (fileName) => {
@@ -80,6 +60,7 @@ export function createServiceCache() {
         }
 
         const text = ts.sys.readFile(fileName);
+
         return text === undefined ? undefined : ts.ScriptSnapshot.fromString(text);
       },
       getCompilationSettings: () => options,
@@ -93,21 +74,15 @@ export function createServiceCache() {
       directoryExists: ts.sys.directoryExists,
     };
 
-    /** @type {ServiceEntry} */
-    const entry = { service: ts.createLanguageService(host), state };
+    const entry: ServiceEntry = { service: ts.createLanguageService(host), state };
     services.set(key, entry);
+
     return entry;
   };
 }
 
-/**
- * Apply TypeScript's text changes to `text`, right-to-left so earlier offsets stay valid.
- *
- * @param {string} text
- * @param {readonly ts.TextChange[]} changes
- * @returns {string}
- */
-export function applyTextChanges(text, changes) {
+/** Apply TypeScript's text changes to `text`, right-to-left so earlier offsets stay valid. */
+export function applyTextChanges(text: string, changes: ReadonlyArray<ts.TextChange>): string {
   let out = text;
   for (const { span, newText } of changes.toSorted((a, b) => b.span.start - a.span.start)) {
     out = out.slice(0, span.start) + newText + out.slice(span.start + span.length);
@@ -124,14 +99,15 @@ export function applyTextChanges(text, changes) {
  * the diagnostic pointed at the import block instead of rewriting the whole file, and keeps
  * the fix from colliding with unrelated rules further down.
  *
- * @param {GetService} getService
- * @param {string | null | undefined} tsconfigPath
- * @param {string} filename Absolute path of the file being linted.
- * @param {string} text
- * @param {Settings} settings
- * @returns {Edit | null}
+ * @param filename Absolute path of the file being linted.
  */
-export function organizeFile(getService, tsconfigPath, filename, text, settings) {
+export function organizeFile(
+  getService: GetService,
+  tsconfigPath: string | null | undefined,
+  filename: string,
+  text: string,
+  settings: Settings
+): Edit | null {
   const { service, state } = getService(tsconfigPath);
   state.file = filename;
   state.text = text;
@@ -141,11 +117,13 @@ export function organizeFile(getService, tsconfigPath, filename, text, settings)
   const [changes] = service.organizeImports(
     { type: 'file', fileName: filename, mode: ts.OrganizeImportsMode[settings.mode] },
     settings.formatOptions,
-    settings.preferences,
+    settings.preferences
   );
 
   const textChanges = changes?.textChanges ?? [];
-  if (textChanges.length === 0) return null;
+  if (textChanges.length === 0) {
+    return null;
+  }
 
   const start = Math.min(...textChanges.map((change) => change.span.start));
   const end = Math.max(...textChanges.map((change) => change.span.start + change.span.length));
@@ -159,7 +137,9 @@ export function organizeFile(getService, tsconfigPath, filename, text, settings)
   const replacement = organized.slice(start, end + delta);
 
   // TypeScript sometimes reports a change that reproduces the original text verbatim.
-  if (replacement === text.slice(start, end)) return null;
+  if (replacement === text.slice(start, end)) {
+    return null;
+  }
 
   return { start, end, replacement };
 }
@@ -167,27 +147,18 @@ export function organizeFile(getService, tsconfigPath, filename, text, settings)
 /**
  * Detect the dominant line ending, so the rewritten import block matches the rest of the file
  * instead of whatever the host platform prefers.
- *
- * @param {string} text
- * @returns {'\n' | '\r\n'}
  */
-function detectNewLine(text) {
+function detectNewLine(text: string): '\n' | '\r\n' {
   const index = text.indexOf('\n');
+
   return index > 0 && text[index - 1] === '\r' ? '\r\n' : '\n';
 }
 
 /**
- * @typedef {object} RuleOptions
- * @property {Mode} [mode]
- * @property {number} [tabWidth]
- * @property {boolean} [useTabs]
- *
- * @param {RuleOptions} [options]
- * @param {string} [text] Source text, used to match the file's existing line endings.
- * @returns {Settings}
+ * @param text Source text, used to match the file's existing line endings.
  */
-export function resolveSettings(options = {}, text = '') {
-  const mode = options.mode ?? 'All';
+export function resolveSettings(options: RuleOptions = {}, text = ''): Settings {
+  const mode: Mode = options.mode ?? 'All';
   const tabWidth = options.tabWidth ?? 2;
   const newLine = detectNewLine(text);
 

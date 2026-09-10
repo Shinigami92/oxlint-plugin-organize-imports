@@ -154,6 +154,22 @@ Oxlint itself does not ship this: [oxc-project/oxc#26521](https://github.com/oxc
 - **TypeScript 7 is not supported.** See above.
 - The plugin shells out to the TypeScript language service per file, so it is meaningfully slower than a native oxlint rule. It is still a single-file program per check, not a full project build.
 
+## Development
+
+The source is TypeScript in `src/`, bundled to `dist/` with [tsdown](https://tsdown.dev) (which also runs `publint` on every build). Tests run the real `oxlint` binary against throwaway fixture projects in a temp dir, and they lint the **built** `dist/index.js` — so the suite covers the published artifact, not just the sources.
+
+```sh
+pnpm install
+pnpm run build       # tsdown -> dist/ (+ publint)
+pnpm run test        # vitest; requires a build first
+pnpm run lint        # oxlint, type-aware
+pnpm run format      # oxfmt
+pnpm run ts-check    # tsc --noEmit
+pnpm run preflight   # everything, in order
+```
+
+This repo lints itself with its own plugin: `oxlint-plugin-organize-imports` is a `link:.` devDependency and `organize-imports/organize-imports` is enabled in `.oxlintrc.json`. That is also why oxfmt's `sortImports` is switched **off** here — running both would mean two tools disagreeing about order, exactly as warned above. `pnpm run lint` therefore needs `pnpm run build` to have run first.
+
 ## License
 
 [MIT](./LICENSE)

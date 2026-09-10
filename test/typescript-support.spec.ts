@@ -8,23 +8,25 @@ import { describe, expect, it, vi } from 'vitest';
 describe('assertLanguageServiceAvailable', () => {
   it('passes on the installed TypeScript 5/6', async () => {
     vi.resetModules();
-    const { assertLanguageServiceAvailable } = await import('../src/typescript-support.js');
+    const { assertLanguageServiceAvailable } = await import('../src/typescript-support');
 
-    expect(() => assertLanguageServiceAvailable()).not.toThrow();
+    expect(() => {
+      assertLanguageServiceAvailable();
+    }).not.toThrow();
   });
 
   it('throws a version-specific error on a TypeScript 7 style module', async () => {
     vi.resetModules();
     vi.doMock('typescript', () => ({ default: { version: '7.0.2' } }));
 
-    const { assertLanguageServiceAvailable } = await import('../src/typescript-support.js');
+    const { assertLanguageServiceAvailable } = await import('../src/typescript-support');
 
-    expect(() => assertLanguageServiceAvailable()).toThrowError(
-      /typescript@7\.0\.2 does not provide one/u,
-    );
-    expect(() => assertLanguageServiceAvailable()).toThrowError(
-      /typescript@\^5 or typescript@\^6/u,
-    );
+    expect(() => {
+      assertLanguageServiceAvailable();
+    }).toThrow(/typescript@7\.0\.2 does not provide one/u);
+    expect(() => {
+      assertLanguageServiceAvailable();
+    }).toThrow(/typescript@\^5 or typescript@\^6/u);
 
     vi.doUnmock('typescript');
     vi.resetModules();
@@ -40,9 +42,11 @@ describe('assertLanguageServiceAvailable', () => {
       },
     }));
 
-    const { assertLanguageServiceAvailable } = await import('../src/typescript-support.js');
+    const { assertLanguageServiceAvailable } = await import('../src/typescript-support');
 
-    expect(() => assertLanguageServiceAvailable()).toThrow();
+    expect(() => {
+      assertLanguageServiceAvailable();
+    }).toThrow();
 
     vi.doUnmock('typescript');
     vi.resetModules();

@@ -1,21 +1,20 @@
 import { afterEach, describe, expect, it } from 'vitest';
-import { createProject } from './harness.js';
+import { createProject } from './harness';
+import type { Project, ProjectSetup } from './harness';
 
-/** @type {import('./harness.js').Project[]} */
-const projects = [];
+const projects: Project[] = [];
 
-/**
- * @param {Parameters<typeof createProject>[0]} setup
- * @returns {import('./harness.js').Project}
- */
-function project(setup) {
+function project(setup: ProjectSetup): Project {
   const created = createProject(setup);
   projects.push(created);
+
   return created;
 }
 
 afterEach(() => {
-  while (projects.length > 0) projects.pop()?.dispose();
+  while (projects.length > 0) {
+    projects.pop()?.dispose();
+  }
 });
 
 const MODULES = {
@@ -112,7 +111,7 @@ describe('fix tiering', () => {
 
     expect(p.lint('--fix-suggestions', 'entry.ts').status).toBe(0);
     expect(p.read('entry.ts')).toBe(
-      'import { a } from "./src/a";\nimport { b } from "./src/b";\n\nconsole.log(a, b);\n',
+      'import { a } from "./src/a";\nimport { b } from "./src/b";\n\nconsole.log(a, b);\n'
     );
   });
 
@@ -121,7 +120,7 @@ describe('fix tiering', () => {
 
     expect(p.lint('--fix', 'entry.ts').status).toBe(0);
     expect(p.read('entry.ts')).toBe(
-      'import { a } from "./src/a";\nimport { b } from "./src/b";\n\nconsole.log(a, b);\n',
+      'import { a } from "./src/a";\nimport { b } from "./src/b";\n\nconsole.log(a, b);\n'
     );
   });
 
@@ -146,7 +145,7 @@ describe('modes', () => {
 
     p.lint('--fix', 'entry.ts');
     expect(p.read('entry.ts')).toBe(
-      'import { a } from "./src/a";\nimport { b, b2 } from "./src/b";\n\nconsole.log(a, b);\n',
+      'import { a } from "./src/a";\nimport { b, b2 } from "./src/b";\n\nconsole.log(a, b);\n'
     );
   });
 
@@ -224,7 +223,7 @@ describe('organizing behaviour', () => {
 
     expect(result).toContain('import "./src/side";');
     expect(result).toBe(
-      'import { a } from "./src/a";\nimport { b } from "./src/b";\nimport "./src/side";\n\nconsole.log(a, b);\n',
+      'import { a } from "./src/a";\nimport { b } from "./src/b";\nimport "./src/side";\n\nconsole.log(a, b);\n'
     );
   });
 
@@ -239,7 +238,7 @@ describe('organizing behaviour', () => {
 
     p.lint('--fix-suggestions', 'entry.ts');
     expect(p.read('entry.ts')).toBe(
-      `import { a } from './src/a';\nimport { b } from "./src/b";\n\nconsole.log(a, b);\n`,
+      `import { a } from './src/a';\nimport { b } from "./src/b";\n\nconsole.log(a, b);\n`
     );
   });
 
@@ -255,7 +254,7 @@ describe('organizing behaviour', () => {
 
     p.lint('--fix-suggestions', 'entry.ts');
     expect(p.read('entry.ts')).toBe(
-      'import { a } from "./src/a";\nimport {\n\tb,\n\tb2,\n} from "./src/b";\n\nconsole.log(a, b, b2);\n',
+      'import { a } from "./src/a";\nimport {\n\tb,\n\tb2,\n} from "./src/b";\n\nconsole.log(a, b, b2);\n'
     );
   });
 
@@ -272,7 +271,7 @@ describe('organizing behaviour', () => {
     const result = p.read('entry.ts');
 
     expect(result).toBe(
-      'import { a } from "./src/a";\r\nimport {\r\n  b,\r\n  b2,\r\n} from "./src/b";\r\n\r\nconsole.log(a, b, b2);\r\n',
+      'import { a } from "./src/a";\r\nimport {\r\n  b,\r\n  b2,\r\n} from "./src/b";\r\n\r\nconsole.log(a, b, b2);\r\n'
     );
     // A bare LF not preceded by CR would mean the rewritten region used the wrong newline.
     expect(/[^\r]\n/u.test(result)).toBe(false);
@@ -328,7 +327,7 @@ describe('tsx', () => {
 
     p.lint('--fix-suggestions', 'entry.tsx');
     expect(p.read('entry.tsx')).toBe(
-      'import React from "react";\nimport { helper } from "./src/helper";\n\nexport const C = () => <div>{helper}</div>;\n',
+      'import React from "react";\nimport { helper } from "./src/helper";\n\nexport const C = () => <div>{helper}</div>;\n'
     );
   });
 
@@ -337,7 +336,7 @@ describe('tsx', () => {
 
     p.lint('--fix-suggestions', 'entry.tsx');
     expect(p.read('entry.tsx')).toBe(
-      'import { helper } from "./src/helper";\n\nexport const C = () => <div>{helper}</div>;\n',
+      'import { helper } from "./src/helper";\n\nexport const C = () => <div>{helper}</div>;\n'
     );
   });
 });
