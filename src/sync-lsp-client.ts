@@ -1,14 +1,15 @@
 import type { MessagePort } from 'node:worker_threads';
 import { MessageChannel, receiveMessageOnPort, Worker } from 'node:worker_threads';
 import type { LspWorkerData, WorkerCommand, WorkerReply } from './lsp-worker';
-import { WORKER_KIND } from './lsp-worker';
+import { trace, WORKER_KIND } from './lsp-worker';
 
 /**
  * Generous on purpose: the first request against a large project makes `tsgo` load the whole
- * program, and a spurious timeout there would be worse than a slow one. A hang past this
- * point is a bug report, not a big repository.
+ * program (a few hundred milliseconds for a few thousand files), and a spurious timeout there
+ * would be worse than a slow one. A hang past this point is a bug report, not a big
+ * repository — and the error names the method, so the report can say where.
  */
-const REQUEST_TIMEOUT_MS = 5 * 60_000;
+const REQUEST_TIMEOUT_MS = 60_000;
 
 /** How long to keep polling the port once the worker has signalled that a reply is queued. */
 const RECEIVE_GRACE_MS = 1_000;
@@ -76,6 +77,7 @@ export class SyncLspClient {
       cwd,
     };
     this.worker = new Worker(workerUrl(), { workerData, transferList: [port2] });
+    trace('client', `worker started for ${executable} ${args.join(' ')}`);
 
     // Neither may keep the process alive once linting is done. The server itself exits when
     // its stdin closes, which happens the moment this process does.
@@ -90,12 +92,17 @@ export class SyncLspClient {
 
     Atomics.store(this.signal, 0, 0);
     this.post({ kind: 'request', id, method, params });
+    trace('client', `→ #${id} ${method}`);
 
     if (Atomics.wait(this.signal, 0, 0, this.timeoutMs) === 'timed-out') {
       throw new Error(`tsgo did not answer '${method}' within ${this.timeoutMs} ms`);
     }
 
     const reply = this.receive(id, method);
+    trace(
+      'client',
+      `← #${id} ${reply.error === undefined ? 'ok' : `error: ${reply.error.message}`}`
+    );
     if (reply.error !== undefined) {
       throw new Error(`tsgo rejected '${method}': ${reply.error.message}`);
     }

@@ -239,6 +239,8 @@ pnpm run benchmark -- <repo>   # see BENCHMARKS.md
 > [!WARNING]
 > Do not verify backend selection with a `link:` install. A linked plugin is a symlink, so Node resolves `typescript` from the plugin's own `node_modules` rather than the consumer's, and the plugin never sees the TypeScript it is supposed to pick a backend for. Use `pnpm pack` and install the tarball instead. See [BENCHMARKS.md](./BENCHMARKS.md).
 
+Set `OXLINT_PLUGIN_ORGANIZE_IMPORTS_TRACE=1` to have the TypeScript 7 bridge narrate every message between the linting thread, its worker and `tsgo` on stderr — the thing to reach for if a run stalls. The CLI suite always sets it, and surfaces the trace when an oxlint spawn times out.
+
 Both backends are under test on every install: the language service through the repo's own `typescript`, the language server through the aliased `typescript-7` dev dependency, whose platform binary the specs resolve directly. CI additionally pins `typescript@7` in some cells so the CLI suite runs the published bundle against the real selection path.
 
 This repo lints itself with its own plugin: `oxlint-plugin-organize-imports` is a `link:.` devDependency and `organize-imports/organize-imports` is enabled in `.oxlintrc.json`. That is also why oxfmt's `sortImports` is switched **off** here — running both would mean two tools disagreeing about order, exactly as warned above. `pnpm run lint` therefore needs `pnpm run build` to have run first.

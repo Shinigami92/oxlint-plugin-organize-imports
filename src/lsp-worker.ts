@@ -8,8 +8,23 @@
  * and from `dist/` once built, so it imports nothing but Node built-ins.
  */
 import { spawn } from 'node:child_process';
+import { writeSync } from 'node:fs';
 import type { MessagePort } from 'node:worker_threads';
-import { isMainThread, parentPort, workerData } from 'node:worker_threads';
+import { isMainThread, parentPort, threadId, workerData } from 'node:worker_threads';
+
+/**
+ * Opt-in trace of the bridge, for when a lint run stalls somewhere nobody can reproduce.
+ * Written straight to fd 2 rather than through `console.error`: a worker's console is
+ * forwarded through the main thread's event loop, which is exactly the thread that is
+ * blocked waiting for us.
+ */
+const TRACE = process.env.OXLINT_PLUGIN_ORGANIZE_IMPORTS_TRACE !== undefined;
+
+export function trace(side: 'client' | 'worker', message: string): void {
+  if (TRACE) {
+    writeSync(2, `[organize-imports:${side} pid=${process.pid} thread=${threadId}] ${message}\n`);
+  }
+}
 
 /** Set on `workerData` so a stray `import` of this file cannot start a server by accident. */
 export const WORKER_KIND = 'oxlint-plugin-organize-imports/lsp-worker';
@@ -113,6 +128,7 @@ function run({ port, signal, executable, args, cwd }: LspWorkerData): void {
     stdio: ['pipe', 'pipe', 'ignore'],
     windowsHide: true,
   });
+  trace('worker', `spawned ${executable} (pid ${child.pid ?? 'none'}) in ${cwd ?? process.cwd()}`);
   const parser = createFrameParser();
   const pending = new Set<number>();
   let fatal: string | undefined;
@@ -124,6 +140,7 @@ function run({ port, signal, executable, args, cwd }: LspWorkerData): void {
   }
 
   function fail(reason: string): void {
+    trace('worker', reason);
     fatal = reason;
     for (const id of pending) {
       reply({ id, error: { message: reason } });
@@ -137,6 +154,7 @@ function run({ port, signal, executable, args, cwd }: LspWorkerData): void {
 
   child.stdout.on('data', (chunk: Buffer) => {
     for (const message of parser.push(chunk)) {
+      trace('worker', `← ${message.method ?? `#${String(message.id)}`}`);
       if (message.method !== undefined) {
         // A server-initiated request (`client/registerCapability`) gets an empty answer; a
         // notification (`window/logMessage`) is dropped. Neither matters to a lint run.
@@ -172,6 +190,7 @@ function run({ port, signal, executable, args, cwd }: LspWorkerData): void {
       return;
     }
 
+    trace('worker', `→ ${command.kind === 'request' ? `#${command.id} ` : ''}${command.method}`);
     if (command.kind === 'request') {
       pending.add(command.id);
       send({ id: command.id, method: command.method, params: command.params });
