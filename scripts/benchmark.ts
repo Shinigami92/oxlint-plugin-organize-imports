@@ -18,8 +18,9 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import ts from 'typescript';
-import { createServiceCache, organizeFile, resolveSettings } from '../src/core';
+import { organizeFile, resolveSettings } from '../src/core';
 import { isOrganizable } from '../src/eligibility';
+import { createLanguageServiceBackend } from '../src/language-service-backend';
 import type { Mode } from '../src/types';
 
 const repoRoot = fileURLToPath(new URL('..', import.meta.url));
@@ -167,17 +168,11 @@ function measure(
   let outputs = new Map<string, string | null>();
 
   const sweep = (subject: ReadonlyArray<string>): Map<string, string | null> => {
-    const getService = createServiceCache(overrides);
+    const backend = createLanguageServiceBackend(overrides);
     const pass = new Map<string, string | null>();
     for (const file of subject) {
       const text = texts.get(file) ?? '';
-      const edit = organizeFile(
-        getService,
-        tsconfigPath,
-        file,
-        text,
-        resolveSettings({ mode }, text)
-      );
+      const edit = organizeFile(backend, tsconfigPath, file, text, resolveSettings({ mode }, text));
       pass.set(file, edit === null ? null : edit.replacement);
     }
 

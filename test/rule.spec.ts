@@ -1,11 +1,12 @@
 import type { Context, CreateOnceRule, Diagnostic, ESTree, Fix, Fixer } from '@oxlint/plugins';
 import fs from 'node:fs';
 import path from 'node:path';
-import ts from 'typescript';
 import { afterAll, describe, expect, it } from 'vitest';
 import plugin from '../src/index';
+import { hasLanguageService } from '../src/language-service-backend';
 import { organizeImportsRule } from '../src/rule';
 import type { RuleOptions } from '../src/types';
+import { LANGUAGE_SERVICE, LSP } from './backends';
 import { createTsconfigProject } from './in-process';
 
 /**
@@ -13,6 +14,9 @@ import { createTsconfigProject } from './in-process';
  * file against a context whose `filename` and `sourceCode` change underneath it. The CLI
  * suite proves the wiring against the real linter; this reaches into the rule's own branches,
  * notably the fix-versus-suggestion split and the per-directory tsconfig cache.
+ *
+ * The rule picks its backend from the installed `typescript`, so these run against the
+ * language service on a 5/6 install and against the language server on 7.
  */
 
 interface RunResult {
@@ -25,23 +29,17 @@ interface Runner {
   run: (filename: string, text: string, options?: RuleOptions) => RunResult;
 }
 
+const IMPORT_STATEMENT = /^import\s[^;]*;/gmu;
+
 /**
  * A `Program` node carrying just what the rule reads: `body`, scanned for the first
- * `ImportDeclaration` to point the diagnostic at. Built from TypeScript's own parse, so the
- * ranges are real ones.
+ * `ImportDeclaration` to point the diagnostic at. The fixtures keep every import on one line,
+ * so a line-anchored match yields real ranges without a parser.
  */
-function createProgramNode(filename: string, text: string): ESTree.Program {
-  const sourceFile = ts.createSourceFile(
-    filename,
-    text,
-    ts.ScriptTarget.Latest,
-    true,
-    filename.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS
-  );
-
-  const body = sourceFile.statements.map((statement) => ({
-    type: ts.isImportDeclaration(statement) ? 'ImportDeclaration' : 'ExpressionStatement',
-    range: [statement.getStart(sourceFile), statement.getEnd()],
+function createProgramNode(text: string): ESTree.Program {
+  const body = [...text.matchAll(IMPORT_STATEMENT)].map((match) => ({
+    type: 'ImportDeclaration',
+    range: [match.index, match.index + match[0].length],
   }));
 
   return { type: 'Program', body, range: [0, text.length] } as unknown as ESTree.Program;
@@ -84,7 +82,7 @@ function createRunner(): Runner {
         return { eligible: false, diagnostics: [] };
       }
 
-      visitor.Program?.(createProgramNode(filename, text));
+      visitor.Program?.(createProgramNode(text));
       visitor.after?.();
 
       return { eligible: true, diagnostics: reported };
@@ -120,7 +118,10 @@ function applySuggestion(result: RunResult, text: string): string {
   return applyFix(suggestion.fix, text);
 }
 
-const project = createTsconfigProject({ target: 'ES2022', strict: true });
+/** The backend `selectBackend()` will pick in this install; only its project helper is used. */
+const installed = hasLanguageService() ? LANGUAGE_SERVICE : LSP;
+
+const project = createTsconfigProject(installed, { target: 'ES2022', strict: true });
 const file = (name: string): string => path.join(project.dir, name);
 
 afterAll(() => {
@@ -217,33 +218,38 @@ describe('Program', () => {
     });
   });
 
-  it('walks up for a tsconfig once per directory, not once per file', () => {
-    // `ts.findConfigFile` is a getter-only export, so the cache is observed rather than
-    // counted: `jsx: react` keeps the `React` import, and losing the config drops it. Once
-    // the tsconfig is deleted, only a directory that was never looked up notices.
-    const cached = createTsconfigProject({ jsx: 'react' });
+  // Only the language service takes the rule's tsconfig; the language server discovers
+  // projects itself and keeps its own view of the disk, so the cache is unobservable there.
+  it.skipIf(installed !== LANGUAGE_SERVICE)(
+    'walks up for a tsconfig once per directory, not once per file',
+    () => {
+      // The lookup is a plain function, so the cache is observed rather than counted:
+      // `jsx: react` keeps the `React` import, and losing the config drops it. Once the
+      // tsconfig is deleted, only a directory that was never looked up notices.
+      const cached = createTsconfigProject(installed, { jsx: 'react' });
 
-    try {
-      const nested = path.join(cached.dir, 'nested');
-      fs.mkdirSync(nested, { recursive: true });
+      try {
+        const nested = path.join(cached.dir, 'nested');
+        fs.mkdirSync(nested, { recursive: true });
 
-      const runner = createRunner();
-      const organized = (name: string): string =>
-        applySuggestion(runner.run(path.join(cached.dir, name), JSX), JSX);
+        const runner = createRunner();
+        const organized = (name: string): string =>
+          applySuggestion(runner.run(path.join(cached.dir, name), JSX), JSX);
 
-      expect(organized('One.tsx')).toContain('React');
+        expect(organized('One.tsx')).toContain('React');
 
-      fs.rmSync(cached.tsconfigPath);
+        fs.rmSync(cached.tsconfigPath);
 
-      // Same directory: answered from the cache, so the deleted config still applies.
-      expect(organized('Two.tsx')).toContain('React');
+        // Same directory: answered from the cache, so the deleted config still applies.
+        expect(organized('Two.tsx')).toContain('React');
 
-      // A directory seen for the first time walks up now, finds nothing, and loses `jsx`,
-      // which is what makes `React` look unused.
-      const fresh = runner.run(path.join(nested, 'Three.tsx'), JSX);
-      expect(applySuggestion(fresh, JSX)).not.toContain('React');
-    } finally {
-      cached.dispose();
+        // A directory seen for the first time walks up now, finds nothing, and loses `jsx`,
+        // which is what makes `React` look unused.
+        const fresh = runner.run(path.join(nested, 'Three.tsx'), JSX);
+        expect(applySuggestion(fresh, JSX)).not.toContain('React');
+      } finally {
+        cached.dispose();
+      }
     }
-  });
+  );
 });

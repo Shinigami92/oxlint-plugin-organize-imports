@@ -20,6 +20,10 @@ export default defineConfig({
       // It only means anything because the in-process specs run `src` in this process; the
       // CLI suite loads `dist/index.js` in a child process, where v8 coverage cannot see it.
       include: ['src'],
+      // The worker half of the LSP bridge runs in a worker thread, where the main thread's
+      // coverage collector cannot see it. Its framing parser is exercised in-process, and the
+      // rest is covered behaviourally by the sync-client and LSP-backend specs.
+      exclude: ['src/lsp-worker.ts'],
       reportOnFailure: true,
       // Set below the current numbers, not at them, so ordinary work does not trip the
       // build; the point is to catch a collapse like the 3 % this replaced. The branches
