@@ -1,7 +1,9 @@
 import { defineConfig } from 'tsdown';
 
 export default defineConfig({
-  entry: ['src/index.ts'],
+  // The worker is a second entry, not an import: `sync-lsp-client.ts` starts it by path as a
+  // sibling `dist/lsp-worker.js`. It imports only Node built-ins, so it bundles to one file.
+  entry: ['src/index.ts', 'src/lsp-worker.ts'],
   outDir: 'dist',
   format: ['esm'],
   dts: true,

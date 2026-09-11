@@ -21,16 +21,20 @@ jobs:
       matrix:
         os: [ubuntu-latest]
         node_version: [24, 26]
-        # TypeScript 7 dropped the JS language service, so it is deliberately not tested:
-        # the plugin refuses to load on it by design. See README, "TypeScript version support".
-        typescript_version: ['5', '6']
+        # 5 and 6 run the in-process language service; 7 has none and runs the `tsgo` language
+        # server instead. Pinning 7 makes the CLI suite exercise that path end to end, while
+        # the in-process specs always cover it through the aliased `typescript-7` dev dep.
+        typescript_version: ['5', '6', '7']
         include:
-          # A single Windows cell, not a cross-product with Node and TypeScript. What differs
-          # on Windows is path resolution, CRLF detection and `ts.sys` file IO, and one cell
-          # exercises all three; a fourfold matrix of them would only cost minutes.
+          # Two Windows cells, not a cross-product with Node and TypeScript. What differs on
+          # Windows is path resolution, CRLF detection and `ts.sys` file IO on 5/6, and the
+          # `.exe` lookup plus worker-thread bridge on 7; one cell each exercises all of it.
           - os: windows-latest
             node_version: 24
             typescript_version: '5'
+          - os: windows-latest
+            node_version: 24
+            typescript_version: '7'
       fail-fast: false
     timeout-minutes: 10
 
@@ -51,14 +55,17 @@ jobs:
       - name: Install deps
         run: pnpm install
 
+      # Before pinning: `tsdown` generates declarations with the lockfile's TypeScript, and 7
+      # has no `typescript` API to do that with. The bundle never includes TypeScript anyway,
+      # so the artifact under test is the same in every cell.
+      - name: Build
+        run: pnpm run build
+
       - name: Pin TypeScript ${{ matrix.typescript_version }}
         run: pnpm add -D typescript@${{ matrix.typescript_version }}
 
       - name: Report resolved TypeScript
         run: pnpm exec tsc --version
-
-      - name: Build
-        run: pnpm run build
 
       - name: Test
         run: pnpm run test

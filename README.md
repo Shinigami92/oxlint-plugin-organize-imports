@@ -112,20 +112,34 @@ The rule reports on the **first import declaration**, and its fix replaces only 
 
 ## TypeScript version support
 
-**Supported: `typescript@^5 || ^6`.**
+**Supported: `typescript@^5 || ^6 || ^7`.** The plugin drives whichever one your project has installed; nothing to configure.
 
-TypeScript 7 (the Go port) no longer ships the JavaScript language service. Its package exports are a version stub plus `typescript/unstable/{sync,async,ast,proto,fs}`; the sync API is compiler and checker only, and the string `organizeImports` does not appear anywhere in the published `dist`. In TypeScript 7 the operation exists only in the tsgo LSP, as the `source.organizeImports` code action. (`organize-imports-cli` pins `typescript: ^6` for the same reason.)
+| TypeScript | How `organizeImports` runs                                                          |
+| ---------- | ----------------------------------------------------------------------------------- |
+| 5, 6       | In-process, through `ts.createLanguageService` — the JavaScript language service.   |
+| 7          | Through the `tsgo` language server that ships with `typescript@7`, driven over LSP. |
 
-Importing `typescript@7` succeeds and even reports a `version`, so the plugin probes for the language service API itself and fails with an explicit error rather than a confusing `undefined is not a function`:
+TypeScript 7 (the Go port) no longer ships the JavaScript language service. Its package exports are a version stub plus `typescript/unstable/*`, and `organizeImports` survives only inside the `tsgo` executable, as the `source.organizeImports` family of code actions — which is exactly what an editor's "Organize Imports" asks for. So on 7 the plugin does what VS Code does: it starts `tsgo --lsp` from the `@typescript/typescript-<platform>` package that `typescript@7` installs, opens each file, requests the code action, and applies the edits. There is no editor involved and nothing else to install; it works the same in CI.
 
-```
-oxlint-plugin-organize-imports requires a TypeScript with the JavaScript language service,
-but typescript@7.0.2 does not provide one.
-```
+oxlint's rule callbacks are synchronous and a language server is not, so the server is driven from a worker thread with an ordinary event loop while the linting thread waits on `Atomics.wait` — the same trick `synckit` uses. One server is started per lint run, when the rule is created, and each file is a `didOpen` / `codeAction` / `didClose` round trip. The server exits with the process.
 
-Note that `typescript@latest` resolves to 7.x, so the version has to be pinned explicitly.
+It is started when the rule is created rather than on the first file for a reason: once oxlint begins linting it reserves tens of gigabytes of address space for its per-file arenas (64 GB with 10 threads, almost none of it ever touched). Node spawns children with `fork()` on Linux, and with the kernel's default memory-overcommit heuristic a `fork()` of a process that large fails with `ENOMEM` on any machine with less memory than that — a 16 GB CI runner, say. Before linting starts the process is a few hundred megabytes and the spawn is routine. macOS and Windows do not fork, so they never noticed.
 
-A TypeScript 7 backend would need a **synchronous** LSP client, because oxlint's JS plugin rule callbacks are synchronous. [`corsa-bind`](https://github.com/microsoft/typescript-go)'s `SyncMsgpackStdio` is the candidate transport. That is a v2 project, not a patch.
+Behaviour is the same on both: the same sorting, merging and removal, the same `tsconfig.json` handling, the same trailing-comma restoration, the same line endings. A sweep of faker's 3 368 source files with scrambled imports produced identical output from both backends, at a different price:
+
+| faker `src/`, scrambled imports, Apple M-series | TypeScript 6.0.3 language service | TypeScript 7.0.2 language server |
+| ----------------------------------------------- | --------------------------------: | -------------------------------: |
+| First file (includes startup / project load)    |                             59 ms |                           213 ms |
+| Per file, 187 of 3 368 needing changes          |                           0.42 ms |                          2.64 ms |
+| Per file, nothing to change                     |                           0.42 ms |                          0.46 ms |
+
+The language server is slower on a file that needs changes because it checks that file against its real project rather than a `noResolve` single-file program. Both are far below what a type-aware lint of the same file costs. Three things differ in output, all by construction:
+
+- **Formatting of a rewritten export list.** `tsgo`'s printer puts each specifier of a multi-line `export { … }` on its own line; TypeScript 5/6 keeps them on one. Both are what the respective editor would produce.
+- **Project scope.** The language service builds a single-file program with the nearest `tsconfig.json`'s options. The language server loads the file's real project, so the first file of a run pays for that (a few hundred milliseconds on a 3 000-file project), and a file that no `tsconfig.json` includes gets default compiler options rather than the nearest tsconfig's — as it would in the editor.
+- **Unparseable files.** The language service gives up; the language server organizes what it could parse. Moot under oxlint, which never runs a rule on a file its own parser rejected.
+
+If `typescript@7` is installed but its platform binary is not — an unsupported platform, or optional dependencies skipped — the plugin fails with a message naming the missing `@typescript/typescript-<platform>-<arch>` package. A TypeScript older than 5 fails with a message naming the supported range.
 
 ## How this differs from oxfmt's `sortImports`
 
@@ -150,10 +164,10 @@ Oxlint itself does not ship this: [oxc-project/oxc#26521](https://github.com/oxc
 
 ## How it works
 
-- One `ts.LanguageService` is created per discovered `tsconfig.json` in `createOnce`, and reused for every file in the run.
-- The `LanguageServiceHost` reports only the **current** file from `getScriptFileNames`, so TypeScript builds a single-file program. `organizeImports` needs the binder and the local checker, not a project-wide type graph. This is the same trick `prettier-plugin-organize-imports` and `organize-imports-cli` use, and it is what keeps the plugin fast enough to run per-file inside a linter.
-- Your `tsconfig.json` is honoured. This matters more than it sounds: under `"jsx": "react"` a `React` import is used by the JSX factory and is kept, while under `"jsx": "react-jsx"` the same import is genuinely unused and gets removed.
-- The program is built with `noResolve`. `organizeImports` decides what is unused from the file's _local_ reference graph and never needs the types behind a module specifier, so there is no reason to load and parse every transitively imported file. This is worth well over an order of magnitude, for identical output — see [BENCHMARKS.md](./BENCHMARKS.md).
+- The backend is picked once, when the rule is created: the language service if the installed `typescript` has one, the `tsgo` language server if it is 7. See [TypeScript version support](#typescript-version-support).
+- **On TypeScript 5/6**, one `ts.LanguageService` is created per discovered `tsconfig.json` and reused for every file in the run. The `LanguageServiceHost` reports only the **current** file from `getScriptFileNames`, so TypeScript builds a single-file program: `organizeImports` needs the binder and the local checker, not a project-wide type graph. This is the same trick `prettier-plugin-organize-imports` and `organize-imports-cli` use. The program is built with `noResolve`, because `organizeImports` decides what is unused from the file's _local_ reference graph and never needs the types behind a module specifier — worth well over an order of magnitude, for identical output; see [BENCHMARKS.md](./BENCHMARKS.md).
+- **On TypeScript 7**, one `tsgo --lsp` process is started when the rule is created (see above for why not later) and each file is a `didOpen` / `codeAction` / `didClose` round trip, made synchronous through a worker thread. The server discovers the file's `tsconfig.json` itself.
+- Your `tsconfig.json` is honoured either way. This matters more than it sounds: under `"jsx": "react"` a `React` import is used by the JSX factory and is kept, while under `"jsx": "react-jsx"` the same import is genuinely unused and gets removed.
 - The scattered text changes TypeScript returns are collapsed into a single ranged replacement.
 - Line endings are detected from the file, so CRLF files do not come back with mixed endings.
 
@@ -207,8 +221,7 @@ imports without merging anything.
 ## Limitations
 
 - **TypeScript only.** Vue, Svelte, and Angular templates are out of scope: oxlint JS plugins do not support custom parsers yet.
-- **TypeScript 7 is not supported.** See above.
-- The plugin drives the TypeScript language service per file, so it is slower than a native oxlint rule. It builds a single-file program per check rather than a full project build, and with `noResolve` the per-file cost is small enough to disappear next to a type-aware lint — [BENCHMARKS.md](./BENCHMARKS.md) has current figures.
+- The plugin drives TypeScript per file, so it is slower than a native oxlint rule. On 5/6 it builds a single-file program per check rather than a full project build, and with `noResolve` the per-file cost is small enough to disappear next to a type-aware lint — [BENCHMARKS.md](./BENCHMARKS.md) has current figures. On 7 the per-file cost is comparable, plus a one-off project load on the first file.
 
 ## Development
 
@@ -226,7 +239,11 @@ pnpm run benchmark -- <repo>   # see BENCHMARKS.md
 ```
 
 > [!WARNING]
-> Do not verify the TypeScript 7 guard with a `link:` install. A linked plugin is a symlink, so Node resolves `typescript` from the plugin's own `node_modules` rather than the consumer's, and the guard never sees the TypeScript it is supposed to reject. Use `pnpm pack` and install the tarball instead. See [BENCHMARKS.md](./BENCHMARKS.md).
+> Do not verify backend selection with a `link:` install. A linked plugin is a symlink, so Node resolves `typescript` from the plugin's own `node_modules` rather than the consumer's, and the plugin never sees the TypeScript it is supposed to pick a backend for. Use `pnpm pack` and install the tarball instead. See [BENCHMARKS.md](./BENCHMARKS.md).
+
+Set `OXLINT_PLUGIN_ORGANIZE_IMPORTS_TRACE=1` to have the TypeScript 7 bridge narrate every message between the linting thread, its worker and `tsgo` on stderr — the thing to reach for if a run stalls — and `OXLINT_PLUGIN_ORGANIZE_IMPORTS_TIMEOUT_MS` to shorten the 60 s the plugin waits for an answer while doing so. The CLI suite always sets both, and surfaces the trace when an oxlint spawn times out.
+
+Both backends are under test on every install: the language service through the repo's own `typescript`, the language server through the aliased `typescript-7` dev dependency, whose platform binary the specs resolve directly. CI additionally pins `typescript@7` in some cells so the CLI suite runs the published bundle against the real selection path.
 
 This repo lints itself with its own plugin: `oxlint-plugin-organize-imports` is a `link:.` devDependency and `organize-imports/organize-imports` is enabled in `.oxlintrc.json`. That is also why oxfmt's `sortImports` is switched **off** here — running both would mean two tools disagreeing about order, exactly as warned above. `pnpm run lint` therefore needs `pnpm run build` to have run first.
 

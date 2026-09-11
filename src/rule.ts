@@ -1,9 +1,10 @@
 import type { ESTree, Fixer } from '@oxlint/plugins';
 import { defineRule } from '@oxlint/plugins';
 import path from 'node:path';
-import ts from 'typescript';
-import { createServiceCache, organizeFile, resolveSettings } from './core';
+import { selectBackend } from './backend';
+import { organizeFile, resolveSettings } from './core';
 import { isOrganizable } from './eligibility';
+import { findTsconfig } from './tsconfig';
 import type { RuleOptions, Settings } from './types';
 
 export const organizeImportsRule = defineRule({
@@ -32,7 +33,10 @@ export const organizeImportsRule = defineRule({
   },
 
   createOnce(context) {
-    const getService = createServiceCache();
+    const backend = selectBackend();
+    // Now, not on the first file: this is the last moment the process is small enough for the
+    // language-server backend to spawn a child on Linux. See `Backend.prepare`.
+    backend.prepare();
     const tsconfigCache = new Map<string, string | null>();
 
     let settings: Settings;
@@ -59,11 +63,11 @@ export const organizeImportsRule = defineRule({
 
         let tsconfigPath = tsconfigCache.get(dir);
         if (tsconfigPath === undefined) {
-          tsconfigPath = ts.findConfigFile(dir, ts.sys.fileExists) ?? null;
+          tsconfigPath = findTsconfig(dir);
           tsconfigCache.set(dir, tsconfigPath);
         }
 
-        const edit = organizeFile(getService, tsconfigPath, filename, text, settings);
+        const edit = organizeFile(backend, tsconfigPath, filename, text, settings);
         if (edit === null) {
           return;
         }

@@ -1,7 +1,7 @@
 {
   "name": "oxlint-plugin-organize-imports",
   "version": "0.1.1",
-  "description": "Oxlint plugin that organizes imports using the TypeScript language service, matching the editor's 'Organize Imports'",
+  "description": "Oxlint plugin that organizes imports the way the editor's 'Organize Imports' does, via the TypeScript language service (5/6) or the tsgo language server (7)",
   "scripts": {
     "clean": "git clean -fdx --exclude .claude --exclude local",
     "build": "tsdown",
@@ -65,11 +65,12 @@
     "tsdown": "0.23.0",
     "tsx": "4.23.13",
     "typescript": "6.0.3",
+    "typescript-7": "npm:typescript@7.0.2",
     "vitest": "5.0.0"
   },
   "peerDependencies": {
     "oxlint": "^1.0.0",
-    "typescript": "^5 || ^6"
+    "typescript": "^5 || ^6 || ^7"
   },
   "packageManager": "pnpm@12.3.4",
   "engines": {

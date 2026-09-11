@@ -14,6 +14,13 @@ const OXLINT_ENTRY = path.join(repoRoot, 'node_modules', 'oxlint', 'bin', 'oxlin
 
 export const RULE_ID = 'organize-imports/organize-imports';
 
+/**
+ * Far above a real run (~150-500 ms), far below vitest's 30 s `testTimeout`, and small enough
+ * that even every case hanging keeps the file under CI's 10-minute job limit — otherwise the
+ * failures would be cancelled away before the reporter ever printed them.
+ */
+const SPAWN_TIMEOUT_MS = 10_000;
+
 const DEFAULT_COMPILER_OPTIONS = {
   target: 'ES2022',
   module: 'ESNext',
@@ -117,11 +124,31 @@ export function createProject({ files, compilerOptions, ruleOptions }: ProjectSe
       process.execPath,
       // Silence every built-in rule, so assertions only ever see this plugin.
       [OXLINT_ENTRY, '-A', 'all', '-D', RULE_ID, ...args],
-      { cwd: dir, encoding: 'utf8' }
+      {
+        cwd: dir,
+        encoding: 'utf8',
+        // A synchronous spawn cannot be interrupted by vitest's own timeout, so a hung oxlint
+        // would otherwise stall the whole run until CI kills the job. Fail the case instead,
+        // with whatever the plugin managed to say: the trace flag makes the language-server
+        // bridge narrate itself to stderr, which only ever shows up in this error.
+        timeout: SPAWN_TIMEOUT_MS,
+        killSignal: 'SIGKILL',
+        env: {
+          ...process.env,
+          OXLINT_PLUGIN_ORGANIZE_IMPORTS_TRACE: '1',
+          // Well inside the spawn timeout, so a stalled server is reported by the plugin — and
+          // the worker's error/exit events get a turn of the event loop to be traced — before
+          // the process is killed.
+          OXLINT_PLUGIN_ORGANIZE_IMPORTS_TIMEOUT_MS: '3000',
+        },
+      }
     );
 
     if (result.error) {
-      throw result.error;
+      throw new Error(
+        `oxlint ${result.error.message} after ${SPAWN_TIMEOUT_MS} ms.\nstdout:\n${result.stdout}\nstderr:\n${result.stderr}`,
+        { cause: result.error }
+      );
     }
 
     return { status: result.status ?? -1, stdout: result.stdout, stderr: result.stderr };
@@ -135,6 +162,15 @@ export function createProject({ files, compilerOptions, ruleOptions }: ProjectSe
       parsed = JSON.parse(stdout) as { diagnostics: RawDiagnostic[] };
     } catch {
       throw new Error(`oxlint did not emit JSON.\nstdout:\n${stdout}\nstderr:\n${stderr}`);
+    }
+
+    // A diagnostic without a code is oxlint reporting that a plugin threw. Its message is the
+    // plugin's error, and stderr holds the bridge trace; both are what a failure needs to show.
+    const crashed = parsed.diagnostics.filter((diagnostic) => typeof diagnostic.code !== 'string');
+    if (crashed.length > 0) {
+      throw new Error(
+        `The plugin threw inside oxlint:\n${crashed.map((diagnostic) => diagnostic.message).join('\n')}\nstderr:\n${stderr}`
+      );
     }
 
     return parsed.diagnostics
