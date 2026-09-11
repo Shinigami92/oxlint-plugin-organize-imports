@@ -66,6 +66,14 @@ export interface TextChange {
 export interface Backend {
   readonly kind: 'language-service' | 'lsp';
   /**
+   * Bring up whatever the backend needs before the first file, while the host process is
+   * still small. The language server has to `fork()` here: once oxlint starts linting it
+   * reserves tens of gigabytes of address space for its per-file arenas, and on Linux with
+   * the default memory-overcommit heuristic the kernel then refuses to duplicate the process
+   * for a child (`spawn ENOMEM`). Nothing to do for the in-process language service.
+   */
+  prepare(): void;
+  /**
    * @param filename Absolute path of the file being linted.
    * @param tsconfigPath Nearest `tsconfig.json`, or `null` for compiler defaults. The
    *   language server discovers projects on its own and ignores it.

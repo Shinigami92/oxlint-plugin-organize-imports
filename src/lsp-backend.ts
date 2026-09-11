@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { resolveSettings } from './core';
 import { SyncLspClient } from './sync-lsp-client';
 import type { Backend, Mode, Settings, TextChange } from './types';
 
@@ -145,8 +146,9 @@ export interface LspBackendOptions {
  *
  * TypeScript 7 no longer ships a JavaScript language service; `organizeImports` survives only
  * as the `source.organizeImports` family of code actions, which is exactly what an editor's
- * "Organize Imports" asks for. The server is started on the first file, once per lint run,
- * and each file is a `didOpen` / `codeAction` / `didClose` round trip.
+ * "Organize Imports" asks for. The server is started once per lint run — by `prepare()`
+ * when the rule is created, or by the first file if nobody called it — and each file is a
+ * `didOpen` / `codeAction` / `didClose` round trip.
  *
  * Two things differ from the in-process backend by construction:
  *
@@ -229,6 +231,11 @@ export function createLspBackend(options: LspBackendOptions): Backend {
 
   return {
     kind: 'lsp',
+    prepare(): void {
+      // The one moment `fork()` is guaranteed to be cheap enough to succeed: see `Backend`.
+      // Preferences are the defaults for now; the first file reconfigures if it needs to.
+      connect(resolveSettings());
+    },
     organize(filename, text, _tsconfigPath, settings): ReadonlyArray<TextChange> {
       const connected = connect(settings);
       applyFormat(connected, settings);

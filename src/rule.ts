@@ -34,6 +34,9 @@ export const organizeImportsRule = defineRule({
 
   createOnce(context) {
     const backend = selectBackend();
+    // Now, not on the first file: this is the last moment the process is small enough for the
+    // language-server backend to spawn a child on Linux. See `Backend.prepare`.
+    backend.prepare();
     const tsconfigCache = new Map<string, string | null>();
 
     let settings: Settings;

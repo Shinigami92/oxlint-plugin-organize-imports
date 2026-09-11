@@ -153,6 +153,9 @@ export function createLanguageServiceBackend(
   return {
     kind: 'language-service',
     getService,
+    prepare(): void {
+      // Services are created per tsconfig on demand; there is nothing to start ahead of time.
+    },
     organize(filename, text, tsconfigPath, settings): ReadonlyArray<TextChange> {
       // Once, here: everything downstream — `state.file`, `getScriptFileNames`, and the name
       // the service is asked about — has to be the same string the host will be called back

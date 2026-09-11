@@ -89,6 +89,37 @@ describe('the language-server backend', () => {
     expect(organizeText(multiLine, { backend })).toContain('\n  b,\n');
   });
 
+  it('can be started ahead of the first file, once', () => {
+    const eager = LSP.create();
+    const text = 'import { b } from "./b";\nimport { a } from "./a";\n\nconsole.log(a, b);\n';
+
+    try {
+      eager.prepare();
+      eager.prepare();
+      expect(organizeText(text, { backend: eager })).toBe(
+        'import { a } from "./a";\nimport { b } from "./b";\n\nconsole.log(a, b);\n'
+      );
+      // Prepared with default preferences; a file asking for something else still gets it.
+      expect(organizeText(multiLine, { backend: eager, options: { tabWidth: 4 } })).toContain(
+        '\n    b,\n'
+      );
+    } finally {
+      eager.dispose();
+    }
+  });
+
+  it('reports a server that cannot be started from prepare() too', () => {
+    const broken = createLspBackend({ executable: '/no/such/tsgo' });
+
+    try {
+      expect(() => {
+        broken.prepare();
+      }).toThrow(/could not start/u);
+    } finally {
+      broken.dispose();
+    }
+  });
+
   it('starts a fresh server after being disposed', () => {
     const disposable = LSP.create();
     const text = 'import { b } from "./b";\nimport { a } from "./a";\n\nconsole.log(a, b);\n';

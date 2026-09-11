@@ -167,8 +167,14 @@ function run({ port, signal, executable, args, cwd }: LspWorkerData): void {
       }
     }
   });
-  child.on('error', (error) => {
-    fail(`could not start ${executable}: ${error.message}`);
+  child.on('error', (error: NodeJS.ErrnoException) => {
+    // `fork()` refused by Linux's memory-overcommit accounting: the host process has reserved
+    // more address space than the machine can promise to duplicate. Nothing about tsgo itself.
+    const hint =
+      error.code === 'ENOMEM'
+        ? ' (the linting process is too large to fork; the server has to be started before linting begins)'
+        : '';
+    fail(`could not start ${executable}: ${error.message}${hint}`);
   });
   child.on('exit', (code, signalName) => {
     fail(`${executable} exited unexpectedly (${code ?? signalName ?? 'unknown'})`);

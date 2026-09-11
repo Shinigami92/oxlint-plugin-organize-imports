@@ -81,7 +81,12 @@ describe.skipIf(!hasLanguageService())('the language-service backend', () => {
     });
   });
 
-  it('is what the registry creates', () => {
-    expect(LANGUAGE_SERVICE.create().kind).toBe('language-service');
+  it('is what the registry creates, and has nothing to prepare', () => {
+    const backend = LANGUAGE_SERVICE.create();
+
+    expect(backend.kind).toBe('language-service');
+    expect(() => {
+      backend.prepare();
+    }).not.toThrow();
   });
 });
