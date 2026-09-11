@@ -133,7 +133,14 @@ export function createProject({ files, compilerOptions, ruleOptions }: ProjectSe
         // bridge narrate itself to stderr, which only ever shows up in this error.
         timeout: SPAWN_TIMEOUT_MS,
         killSignal: 'SIGKILL',
-        env: { ...process.env, OXLINT_PLUGIN_ORGANIZE_IMPORTS_TRACE: '1' },
+        env: {
+          ...process.env,
+          OXLINT_PLUGIN_ORGANIZE_IMPORTS_TRACE: '1',
+          // Well inside the spawn timeout, so a stalled server is reported by the plugin — and
+          // the worker's error/exit events get a turn of the event loop to be traced — before
+          // the process is killed.
+          OXLINT_PLUGIN_ORGANIZE_IMPORTS_TIMEOUT_MS: '3000',
+        },
       }
     );
 

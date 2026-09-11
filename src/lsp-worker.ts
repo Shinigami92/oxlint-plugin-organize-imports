@@ -123,6 +123,7 @@ function isLspWorkerData(data: unknown): data is LspWorkerData {
 }
 
 function run({ port, signal, executable, args, cwd }: LspWorkerData): void {
+  trace('worker', `running on Node ${process.version}, about to spawn`);
   const child = spawn(executable, args, {
     cwd,
     stdio: ['pipe', 'pipe', 'ignore'],
@@ -200,6 +201,12 @@ function run({ port, signal, executable, args, cwd }: LspWorkerData): void {
   });
 }
 
+if (!isMainThread) {
+  trace(
+    'worker',
+    `module loaded (workerData ${isLspWorkerData(workerData) ? 'recognised' : 'not recognised'})`
+  );
+}
 if (!isMainThread && isLspWorkerData(workerData)) {
   run(workerData);
 }

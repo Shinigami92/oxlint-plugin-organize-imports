@@ -159,14 +159,11 @@ export interface LspBackendOptions {
 export function createLspBackend(options: LspBackendOptions): Backend {
   const cwd = options.cwd ?? process.cwd();
   let client: SyncLspClient | undefined;
+  /** A failed start is final for the run: retrying it for every file would multiply the wait. */
+  let startupError: Error | undefined;
   let appliedFormat: FormatPreferences | undefined;
 
-  function connect(settings: Settings): SyncLspClient {
-    if (client !== undefined) {
-      return client;
-    }
-
-    const started = new SyncLspClient({ executable: options.executable, cwd });
+  function initialize(started: SyncLspClient, settings: Settings): void {
     const rootUri = pathToFileURL(cwd).href;
     appliedFormat = formatPreferences(settings);
 
@@ -193,6 +190,24 @@ export function createLspBackend(options: LspBackendOptions): Backend {
       },
     });
     started.notify('initialized', {});
+  }
+
+  function connect(settings: Settings): SyncLspClient {
+    if (client !== undefined) {
+      return client;
+    }
+    if (startupError !== undefined) {
+      throw startupError;
+    }
+
+    const started = new SyncLspClient({ executable: options.executable, cwd });
+    try {
+      initialize(started, settings);
+    } catch (error) {
+      started.dispose();
+      startupError = error instanceof Error ? error : new Error(String(error));
+      throw startupError;
+    }
 
     client = started;
 
@@ -257,6 +272,7 @@ export function createLspBackend(options: LspBackendOptions): Backend {
     dispose(): void {
       client?.dispose();
       client = undefined;
+      startupError = undefined;
       appliedFormat = undefined;
     },
   };

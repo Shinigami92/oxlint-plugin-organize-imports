@@ -109,13 +109,28 @@ describe('the language-server backend', () => {
     }).not.toThrow();
   });
 
-  it('reports a server that cannot be started', () => {
+  it('reports a server that cannot be started, once, and does not retry per file', () => {
     const broken = createLspBackend({ executable: '/no/such/tsgo' });
 
     try {
       expect(() => organizeText(multiLine, { backend: broken })).toThrow(/could not start/u);
+      // The second file must fail immediately with the same error rather than start another
+      // worker: on a real run that would mean one full timeout per file.
+      const before = performance.now();
+      expect(() => organizeText(multiLine, { backend: broken })).toThrow(/could not start/u);
+      expect(performance.now() - before).toBeLessThan(50);
     } finally {
       broken.dispose();
     }
+  });
+
+  it('starts over after a failed start once disposed', () => {
+    const broken = createLspBackend({ executable: '/no/such/tsgo' });
+    expect(() => organizeText(multiLine, { backend: broken })).toThrow(/could not start/u);
+    broken.dispose();
+
+    // Still broken, but it must try again rather than replay the remembered error.
+    expect(() => organizeText(multiLine, { backend: broken })).toThrow(/could not start/u);
+    broken.dispose();
   });
 });

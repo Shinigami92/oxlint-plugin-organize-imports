@@ -11,6 +11,13 @@ import { trace, WORKER_KIND } from './lsp-worker';
  */
 const REQUEST_TIMEOUT_MS = 60_000;
 
+/** Debugging knob, paired with the trace flag: a run that is going to hang should fail fast. */
+function defaultTimeoutMs(): number {
+  const override = Number(process.env.OXLINT_PLUGIN_ORGANIZE_IMPORTS_TIMEOUT_MS);
+
+  return Number.isFinite(override) && override > 0 ? override : REQUEST_TIMEOUT_MS;
+}
+
 /** How long to keep polling the port once the worker has signalled that a reply is queued. */
 const RECEIVE_GRACE_MS = 1_000;
 
@@ -61,7 +68,7 @@ export class SyncLspClient {
     executable,
     args = ['--lsp', '-stdio'],
     cwd,
-    timeoutMs = REQUEST_TIMEOUT_MS,
+    timeoutMs = defaultTimeoutMs(),
   }: SyncLspClientOptions) {
     const { port1, port2 } = new MessageChannel();
     this.port = port1;
@@ -77,7 +84,21 @@ export class SyncLspClient {
       cwd,
     };
     this.worker = new Worker(workerUrl(), { workerData, transferList: [port2] });
-    trace('client', `worker started for ${executable} ${args.join(' ')}`);
+    trace(
+      'client',
+      `worker ${this.worker.threadId} started from ${workerUrl().href} for ${executable} ${args.join(' ')} (Node ${process.version}, execArgv ${JSON.stringify(process.execArgv)}, NODE_OPTIONS ${JSON.stringify(process.env.NODE_OPTIONS)})`
+    );
+    // These can only be observed once this thread is back in its event loop — after a request
+    // has timed out, say — but that is exactly when they explain what went wrong.
+    this.worker.on('error', (error: unknown) => {
+      trace(
+        'client',
+        `worker error: ${error instanceof Error ? (error.stack ?? error.message) : String(error)}`
+      );
+    });
+    this.worker.on('exit', (code) => {
+      trace('client', `worker exited with code ${code}`);
+    });
 
     // Neither may keep the process alive once linting is done. The server itself exits when
     // its stdin closes, which happens the moment this process does.
