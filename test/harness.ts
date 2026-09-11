@@ -164,6 +164,15 @@ export function createProject({ files, compilerOptions, ruleOptions }: ProjectSe
       throw new Error(`oxlint did not emit JSON.\nstdout:\n${stdout}\nstderr:\n${stderr}`);
     }
 
+    // A diagnostic without a code is oxlint reporting that a plugin threw. Its message is the
+    // plugin's error, and stderr holds the bridge trace; both are what a failure needs to show.
+    const crashed = parsed.diagnostics.filter((diagnostic) => typeof diagnostic.code !== 'string');
+    if (crashed.length > 0) {
+      throw new Error(
+        `The plugin threw inside oxlint:\n${crashed.map((diagnostic) => diagnostic.message).join('\n')}\nstderr:\n${stderr}`
+      );
+    }
+
     return parsed.diagnostics
       .filter((diagnostic) => diagnostic.code.startsWith('organize-imports'))
       .map((diagnostic) => {

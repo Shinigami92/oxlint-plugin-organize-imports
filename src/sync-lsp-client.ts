@@ -89,7 +89,9 @@ export class SyncLspClient {
       `worker ${this.worker.threadId} started from ${workerUrl().href} for ${executable} ${args.join(' ')} (Node ${process.version}, execArgv ${JSON.stringify(process.execArgv)}, NODE_OPTIONS ${JSON.stringify(process.env.NODE_OPTIONS)})`
     );
     // These can only be observed once this thread is back in its event loop — after a request
-    // has timed out, say — but that is exactly when they explain what went wrong.
+    // has timed out, say — but that is exactly when they explain what went wrong. Diagnostics
+    // only, hence outside the coverage count: nothing here changes behaviour.
+    /* v8 ignore start */
     this.worker.on('error', (error: unknown) => {
       trace(
         'client',
@@ -99,6 +101,7 @@ export class SyncLspClient {
     this.worker.on('exit', (code) => {
       trace('client', `worker exited with code ${code}`);
     });
+    /* v8 ignore stop */
 
     // Neither may keep the process alive once linting is done. The server itself exits when
     // its stdin closes, which happens the moment this process does.
@@ -167,6 +170,9 @@ export class SyncLspClient {
           return reply;
         }
       } else if (performance.now() > deadline) {
+        // Unreachable unless the worker breaks its own protocol; kept as a guard against an
+        // endless spin rather than as a path anything exercises.
+        /* v8 ignore next 2 */
         throw new Error(`tsgo signalled a reply to '${method}' that never arrived`);
       }
     }
