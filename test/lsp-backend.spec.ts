@@ -1,5 +1,6 @@
 import fs from 'node:fs';
-import { afterAll, describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import {
   createLspBackend,
   installedTypescriptPackage,
@@ -9,6 +10,8 @@ import {
 } from '../src/lsp-backend';
 import { LSP, TYPESCRIPT_7_PACKAGE } from './backends';
 import { organizeText } from './in-process';
+
+const FAKE_SERVER = fileURLToPath(new URL('./fixtures/fake-lsp-server.ts', import.meta.url));
 
 /**
  * What is specific to the language-server backend. Everything it shares with the language
@@ -152,6 +155,42 @@ describe('the language-server backend', () => {
       expect(performance.now() - before).toBeLessThan(50);
     } finally {
       broken.dispose();
+    }
+  });
+
+  it('stops asking a server that answers nothing, instead of waiting out every file', () => {
+    // The fixture server starts, initializes, and then ignores `textDocument/codeAction` —
+    // the shape of a `tsgo` that is alive but wedged. Without the breaker every remaining
+    // file of the run would wait the full request timeout again.
+    // The one budget covers spawning the server and initializing it as well as waiting out
+    // the request it ignores, so it has to be comfortably longer than a cold `node` start on
+    // a loaded CI runner. Every assertion below names the method that timed out rather than
+    // just matching `did not answer`, so a budget that turns out to be too small fails here
+    // instead of quietly moving the timeout to `initialize` and testing nothing.
+    vi.stubEnv('OXLINT_PLUGIN_ORGANIZE_IMPORTS_TIMEOUT_MS', '3000');
+    const wedged = createLspBackend({ executable: process.execPath, args: [FAKE_SERVER] });
+    const ignored = /did not answer 'textDocument\/codeAction'/u;
+
+    try {
+      // Up and initialized before anything is timed: what follows is a server going quiet,
+      // not one that never arrived.
+      wedged.prepare();
+
+      expect(() => organizeText(multiLine, { backend: wedged })).toThrow(ignored);
+
+      const before = performance.now();
+      expect(() => organizeText(multiLine, { backend: wedged })).toThrow(ignored);
+      expect(performance.now() - before).toBeLessThan(50);
+
+      // The breaker is per connection, so a disposed backend gets a fresh server and a fresh
+      // chance — this one is still wedged, hence the wait is back.
+      wedged.dispose();
+      const afterDispose = performance.now();
+      expect(() => organizeText(multiLine, { backend: wedged })).toThrow(ignored);
+      expect(performance.now() - afterDispose).toBeGreaterThan(1_000);
+    } finally {
+      wedged.dispose();
+      vi.unstubAllEnvs();
     }
   });
 

@@ -1,3 +1,6 @@
+// The client and the one failure a caller can act on. Splitting a five-line error subclass
+// into a module of its own would cost more than it explains.
+// oxlint-disable eslint/max-classes-per-file
 import type { MessagePort } from 'node:worker_threads';
 import { MessageChannel, receiveMessageOnPort, Worker } from 'node:worker_threads';
 import type { LspWorkerData, WorkerCommand, WorkerReply } from './lsp-worker';
@@ -21,6 +24,21 @@ function defaultTimeoutMs(): number {
 /** How long to keep polling the port once the worker has signalled that a reply is queued. */
 const RECEIVE_GRACE_MS = 1_000;
 
+/**
+ * A request the server did not answer in time.
+ *
+ * Its own type because it is the one failure a caller can act on: a rejection is about the
+ * request, and a dead server is already latched by the worker, but an unresponsive server
+ * will cost the full timeout again for every request that follows. See the latch in
+ * `lsp-backend.ts`.
+ */
+export class LspTimeoutError extends Error {
+  constructor(method: string, timeoutMs: number) {
+    super(`tsgo did not answer '${method}' within ${timeoutMs} ms`);
+    this.name = 'LspTimeoutError';
+  }
+}
+
 export interface SyncLspClientOptions {
   readonly executable: string;
   /**
@@ -29,7 +47,7 @@ export interface SyncLspClientOptions {
   readonly args?: ReadonlyArray<string>;
   readonly cwd?: string;
   /**
-   * @default 300000
+   * @default {@link REQUEST_TIMEOUT_MS}
    */
   readonly timeoutMs?: number;
 }
@@ -119,7 +137,7 @@ export class SyncLspClient {
     trace('client', `→ #${id} ${method}`);
 
     if (Atomics.wait(this.signal, 0, 0, this.timeoutMs) === 'timed-out') {
-      throw new Error(`tsgo did not answer '${method}' within ${this.timeoutMs} ms`);
+      throw new LspTimeoutError(method, this.timeoutMs);
     }
 
     const reply = this.receive(id, method);

@@ -63,6 +63,10 @@ function handle(message: Message): void {
     case 'crash':
       process.exit(3);
       break;
+    // Deliberately never answered, and deliberately not `slow`: a server that is alive and
+    // ignoring the one method the LSP backend calls is what its circuit breaker is for.
+    case 'textDocument/codeAction':
+      break;
     default:
       send({ id, result: null });
   }

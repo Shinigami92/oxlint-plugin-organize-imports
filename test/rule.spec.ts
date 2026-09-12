@@ -1,11 +1,12 @@
 import type { Context, CreateOnceRule, Diagnostic, ESTree, Fix, Fixer } from '@oxlint/plugins';
 import fs from 'node:fs';
 import path from 'node:path';
-import { afterAll, describe, expect, it } from 'vitest';
+import type { MockInstance } from 'vitest';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import plugin from '../src/index';
 import { hasLanguageService } from '../src/language-service-backend';
-import { organizeImportsRule } from '../src/rule';
-import type { RuleOptions } from '../src/types';
+import { createOrganizeImports, organizeImportsRule } from '../src/rule';
+import type { Backend, RuleOptions } from '../src/types';
 import { LANGUAGE_SERVICE, LSP } from './backends';
 import { createTsconfigProject } from './in-process';
 
@@ -48,8 +49,11 @@ function createProgramNode(text: string): ESTree.Program {
 /**
  * One initialized rule plus the mutable stub context behind it. Only the handful of members
  * the rule touches are provided; the real `Context` is far too wide to build by hand.
+ *
+ * @param select A backend to use instead of the installed TypeScript's, for the cases that
+ *   need one that fails. Without it the real rule object is driven, wiring included.
  */
-function createRunner(): Runner {
+function createRunner(select?: () => Backend): Runner {
   const state = { filename: '', text: '', options: [] as RuleOptions[] };
   let reported: Diagnostic[] = [];
 
@@ -69,7 +73,10 @@ function createRunner(): Runner {
     },
   } as unknown as Context;
 
-  const visitor = (organizeImportsRule as CreateOnceRule).createOnce(context);
+  const visitor =
+    select === undefined
+      ? (organizeImportsRule as CreateOnceRule).createOnce(context)
+      : createOrganizeImports(context, select);
 
   return {
     run(filename, text, options): RunResult {
@@ -168,6 +175,92 @@ describe('before', () => {
     expect(
       runner.run(file('entry.ts'), UNSORTED, { mode: 'SortAndCombine' }).diagnostics[0]?.suggest
     ).toBeUndefined();
+  });
+});
+
+/** Nothing in `containment` may reach the real console: a passing suite must stay quiet. */
+function withStderr(assert: (stderr: MockInstance<typeof console.error>) => void): void {
+  const stderr = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+  try {
+    assert(stderr);
+  } finally {
+    stderr.mockRestore();
+  }
+}
+
+/** A backend that is fine until it is asked to do the one thing it exists for. */
+function failing(organize: Backend['organize']): Backend {
+  return { kind: 'lsp', prepare: () => {}, organize, dispose: () => {} };
+}
+
+describe('containment', () => {
+  it.each([
+    [
+      'a backend that cannot be selected',
+      (): Backend => {
+        throw new Error('no TypeScript 7 executable');
+      },
+    ],
+    [
+      'a backend that cannot be prepared',
+      (): Backend => ({
+        ...failing(() => []),
+        prepare: () => {
+          throw new Error('no TypeScript 7 executable');
+        },
+      }),
+    ],
+  ])('sits the run out rather than throwing out of createOnce for %s', (_label, select) => {
+    // A throw out of `createOnce` is not contained by oxlint: it fails the whole run as a
+    // configuration error and nothing gets linted, by any rule of any plugin.
+    withStderr((stderr) => {
+      const runner = createRunner(select);
+
+      expect(runner.run(file('entry.ts'), UNSORTED)).toEqual({ eligible: false, diagnostics: [] });
+      expect(runner.run(file('other.ts'), UNSORTED).eligible).toBe(false);
+
+      expect(stderr).toHaveBeenCalledTimes(1);
+      expect(stderr.mock.calls[0]?.[0]).toContain('no TypeScript 7 executable');
+    });
+  });
+
+  it('survives a backend that fails to start and then fails to be released', () => {
+    withStderr((stderr) => {
+      const runner = createRunner(() => ({
+        ...failing(() => []),
+        prepare: () => {
+          throw new Error('no TypeScript 7 executable');
+        },
+        // A bare string, not an `Error`: whatever a backend throws has to end up readable.
+        dispose: () => {
+          // oxlint-disable-next-line typescript/only-throw-error, no-throw-literal
+          throw 'the worker will not stop';
+        },
+      }));
+
+      expect(runner.run(file('entry.ts'), UNSORTED).eligible).toBe(false);
+      expect(stderr).toHaveBeenCalledTimes(2);
+      expect(stderr.mock.calls[1]?.[0]).toContain('the worker will not stop');
+    });
+  });
+
+  it('leaves a file unorganized when the backend throws, and says so once', () => {
+    withStderr((stderr) => {
+      const runner = createRunner(() =>
+        failing(() => {
+          throw new Error('tsgo did not answer');
+        })
+      );
+
+      // Eligible, attempted, and silently left alone — one bad file must not cost the reader
+      // a stack trace, and a backend that has given up fails for every file that follows.
+      expect(runner.run(file('one.ts'), UNSORTED)).toEqual({ eligible: true, diagnostics: [] });
+      expect(runner.run(file('two.ts'), UNSORTED)).toEqual({ eligible: true, diagnostics: [] });
+
+      expect(stderr).toHaveBeenCalledTimes(1);
+      expect(stderr.mock.calls[0]?.[0]).toContain('tsgo did not answer');
+    });
   });
 });
 
