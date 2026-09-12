@@ -100,11 +100,24 @@ export function organizeFile(
 /**
  * Detect the dominant line ending, so the rewritten import block matches the rest of the file
  * instead of whatever the host platform prefers.
+ *
+ * Counting rather than sampling the first line matters on the TypeScript 7 path, where every
+ * edit the server returns is re-joined with this character. A file that opens LF and continues
+ * CRLF would otherwise be rewritten LF throughout. Ties fall to LF.
  */
 function detectNewLine(text: string): '\n' | '\r\n' {
-  const index = text.indexOf('\n');
+  let lf = 0;
+  let crlf = 0;
 
-  return index > 0 && text[index - 1] === '\r' ? '\r\n' : '\n';
+  for (let index = text.indexOf('\n'); index !== -1; index = text.indexOf('\n', index + 1)) {
+    if (text[index - 1] === '\r') {
+      crlf++;
+    } else {
+      lf++;
+    }
+  }
+
+  return crlf > lf ? '\r\n' : '\n';
 }
 
 /**

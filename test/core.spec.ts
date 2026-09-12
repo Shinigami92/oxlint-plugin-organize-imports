@@ -370,6 +370,10 @@ describe('resolveSettings', () => {
     ['an LF file', 'const a = 1;\nconst b = 2;\n', '\n'],
     ['a CRLF file', 'const a = 1;\r\nconst b = 2;\r\n', '\r\n'],
     ['a file with no line ending at all', 'const a = 1;', '\n'],
+    ['a file opening LF but mostly CRLF', 'a\nb\r\nc\r\nd\r\n', '\r\n'],
+    ['a file opening CRLF but mostly LF', 'a\r\nb\nc\nd\n', '\n'],
+    ['a file with an equal split', 'a\nb\r\n', '\n'],
+    ['a lone CR, which is not a line ending here', 'a\rb\nc\n', '\n'],
   ])('picks the newline of %s', (_label, text, newLine) => {
     expect(resolveSettings({}, text).newLine).toBe(newLine);
   });
