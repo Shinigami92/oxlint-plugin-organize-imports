@@ -1,5 +1,6 @@
 import fs from 'node:fs';
-import { afterAll, describe, expect, it } from 'vitest';
+import { fileURLToPath } from 'node:url';
+import { afterAll, describe, expect, it, vi } from 'vitest';
 import {
   createLspBackend,
   installedTypescriptPackage,
@@ -9,6 +10,8 @@ import {
 } from '../src/lsp-backend';
 import { LSP, TYPESCRIPT_7_PACKAGE } from './backends';
 import { organizeText } from './in-process';
+
+const FAKE_SERVER = fileURLToPath(new URL('./fixtures/fake-lsp-server.ts', import.meta.url));
 
 /**
  * What is specific to the language-server backend. Everything it shares with the language
@@ -152,6 +155,32 @@ describe('the language-server backend', () => {
       expect(performance.now() - before).toBeLessThan(50);
     } finally {
       broken.dispose();
+    }
+  });
+
+  it('stops asking a server that answers nothing, instead of waiting out every file', () => {
+    // The fixture server starts, initializes, and then ignores `textDocument/codeAction` —
+    // the shape of a `tsgo` that is alive but wedged. Without the breaker every remaining
+    // file of the run would wait the full request timeout again.
+    vi.stubEnv('OXLINT_PLUGIN_ORGANIZE_IMPORTS_TIMEOUT_MS', '200');
+    const wedged = createLspBackend({ executable: process.execPath, args: [FAKE_SERVER] });
+
+    try {
+      expect(() => organizeText(multiLine, { backend: wedged })).toThrow(/did not answer/u);
+
+      const before = performance.now();
+      expect(() => organizeText(multiLine, { backend: wedged })).toThrow(/did not answer/u);
+      expect(performance.now() - before).toBeLessThan(50);
+
+      // The breaker is per connection, so a disposed backend gets a fresh server and a fresh
+      // chance — this one is still wedged, hence the wait is back.
+      wedged.dispose();
+      const afterDispose = performance.now();
+      expect(() => organizeText(multiLine, { backend: wedged })).toThrow(/did not answer/u);
+      expect(performance.now() - afterDispose).toBeGreaterThan(150);
+    } finally {
+      wedged.dispose();
+      vi.unstubAllEnvs();
     }
   });
 

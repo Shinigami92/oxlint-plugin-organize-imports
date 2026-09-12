@@ -2,7 +2,7 @@ import { createRequire } from 'node:module';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { resolveSettings } from './core';
-import { SyncLspClient } from './sync-lsp-client';
+import { LspTimeoutError, SyncLspClient } from './sync-lsp-client';
 import type { Backend, Mode, Settings, TextChange } from './types';
 
 /** The `package.json` of the `typescript` this plugin resolves, i.e. the consumer's. */
@@ -133,6 +133,13 @@ export interface LspBackendOptions {
   /** Absolute path of the `tsgo` executable; see {@link resolveTsgoExecutable}. */
   readonly executable: string;
   /**
+   * Arguments the executable is started with. Only tests pass anything here, to put a stand-in
+   * server on the other end of the bridge.
+   *
+   * @default ['--lsp', '-stdio']
+   */
+  readonly args?: ReadonlyArray<string>;
+  /**
    * Workspace root reported to the server. It has no bearing on which `tsconfig.json` a file
    * belongs to — `tsgo` walks up from the file — so the current directory is fine.
    *
@@ -163,6 +170,13 @@ export function createLspBackend(options: LspBackendOptions): Backend {
   let client: SyncLspClient | undefined;
   /** A failed start is final for the run: retrying it for every file would multiply the wait. */
   let startupError: Error | undefined;
+  /**
+   * The same, for a server that started and then stopped answering. A dead server is latched
+   * by the worker and rejects instantly, but a wedged one (paused, deadlocked, swapping) costs
+   * the full request timeout every time it is asked — a minute per file at the default, which
+   * for a few hundred files is hours of a lint run that looks like it has simply stopped.
+   */
+  let wedgedError: Error | undefined;
   let appliedFormat: FormatPreferences | undefined;
 
   function initialize(started: SyncLspClient, settings: Settings): void {
@@ -202,7 +216,7 @@ export function createLspBackend(options: LspBackendOptions): Backend {
       throw startupError;
     }
 
-    const started = new SyncLspClient({ executable: options.executable, cwd });
+    const started = new SyncLspClient({ executable: options.executable, args: options.args, cwd });
     try {
       initialize(started, settings);
     } catch (error) {
@@ -237,6 +251,10 @@ export function createLspBackend(options: LspBackendOptions): Backend {
       connect(resolveSettings());
     },
     organize(filename, text, _tsconfigPath, settings): ReadonlyArray<TextChange> {
+      if (wedgedError !== undefined) {
+        throw wedgedError;
+      }
+
       const connected = connect(settings);
       applyFormat(connected, settings);
 
@@ -253,8 +271,23 @@ export function createLspBackend(options: LspBackendOptions): Backend {
           range: { start: { line: 0, character: 0 }, end: { line: starts.length, character: 0 } },
           context: { diagnostics: [], only: [CODE_ACTION_KINDS[settings.mode]] },
         }) as CodeAction[] | null;
+      } catch (error) {
+        if (error instanceof LspTimeoutError) {
+          // Trip the breaker: the server is alive but not listening, so hang up rather than
+          // wait out the timeout again for every file that is left.
+          wedgedError = error;
+          client?.dispose();
+          client = undefined;
+          appliedFormat = undefined;
+        }
+
+        throw error;
       } finally {
-        connected.notify('textDocument/didClose', { textDocument: { uri } });
+        // Skipped when the breaker just tripped — there is no connection left to tell, and
+        // nothing was listening anyway.
+        if (client !== undefined) {
+          connected.notify('textDocument/didClose', { textDocument: { uri } });
+        }
       }
 
       const edit = actions?.[0]?.edit;
@@ -280,6 +313,7 @@ export function createLspBackend(options: LspBackendOptions): Backend {
       client?.dispose();
       client = undefined;
       startupError = undefined;
+      wedgedError = undefined;
       appliedFormat = undefined;
     },
   };

@@ -139,7 +139,13 @@ The language server is slower on a file that needs changes because it checks tha
 - **Project scope.** The language service builds a single-file program with the nearest `tsconfig.json`'s options. The language server loads the file's real project, so the first file of a run pays for that (a few hundred milliseconds on a 3 000-file project), and a file that no `tsconfig.json` includes gets default compiler options rather than the nearest tsconfig's — as it would in the editor.
 - **Unparseable files.** The language service gives up; the language server organizes what it could parse. Moot under oxlint, which never runs a rule on a file its own parser rejected.
 
-If `typescript@7` is installed but its platform binary is not — an unsupported platform, or optional dependencies skipped — the plugin fails with a message naming the missing `@typescript/typescript-<platform>-<arch>` package. A TypeScript older than 5 fails with a message naming the supported range.
+### When the backend cannot run
+
+Whatever goes wrong, the rest of your lint run still happens.
+
+If `typescript@7` is installed but its platform binary is not — an unsupported platform, or optional dependencies skipped — the plugin writes one line to stderr naming the missing `@typescript/typescript-<platform>-<arch>` package and then sits the run out; every other rule of every other plugin lints as usual. A TypeScript older than 5 is reported the same way, naming the supported range. (Both would otherwise abort the whole run: oxlint treats a plugin that throws while loading as a broken configuration and lints nothing at all.)
+
+If the language server stops answering once the run is under way, the plugin reports that once and leaves the remaining files unorganized, rather than waiting out its 60-second timeout for every one of them.
 
 ## How this differs from oxfmt's `sortImports`
 
