@@ -57,7 +57,7 @@
     "@types/node": "26.5.1",
     "@vitest/coverage-v8": "5.0.0",
     "npm-run-all2": "9.0.3",
-    "oxfmt": "0.67.0",
+    "oxfmt": "0.70.0",
     "oxlint": "1.82.0",
     "oxlint-plugin-organize-imports": "link:.",
     "oxlint-tsgolint": "7.0.2001",
