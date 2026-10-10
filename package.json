@@ -54,16 +54,16 @@
     "@oxlint/plugins": "^1.82.0"
   },
   "devDependencies": {
-    "@types/node": "26.5.1",
+    "@types/node": "26.6.5",
     "@vitest/coverage-v8": "5.0.0",
     "npm-run-all2": "9.0.3",
     "oxfmt": "0.67.0",
     "oxlint": "1.82.0",
     "oxlint-plugin-organize-imports": "link:.",
     "oxlint-tsgolint": "7.0.2001",
-    "publint": "0.3.24",
-    "tsdown": "0.23.0",
-    "tsx": "4.23.13",
+    "publint": "0.3.25",
+    "tsdown": "0.23.1",
+    "tsx": "4.23.15",
     "typescript": "6.0.3",
     "typescript-7": "npm:typescript@7.0.2",
     "vitest": "5.0.0"
